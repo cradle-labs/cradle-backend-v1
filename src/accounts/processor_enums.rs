@@ -100,7 +100,9 @@ pub enum AccountsProcessorInput {
     GetWallets, // TODO: implementations later
     AssociateTokenToWallet(AssociateTokenToWalletInputArgs),
     GrantKYC(GrantKYCInputArgs),
-    WithdrawTokens(WithdrawTokensInputArgs)
+    WithdrawTokens(WithdrawTokensInputArgs),
+    HandleAssociateAssets(Uuid),
+    HandleKYCAssets(Uuid)
 }
 
 
@@ -131,5 +133,7 @@ pub enum AccountsProcessorOutput {
     DeleteWallet,
     AssociateTokenToWallet,
     GrantKYC,
-    WithdrawTokens
+    WithdrawTokens,
+    HandleAssociateAssets,
+    HandleKYCAssets
 }

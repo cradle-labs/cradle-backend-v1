@@ -42,8 +42,29 @@ pub mod sql_types {
     pub struct OrderStatus;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "order_type"))]
+    pub struct OrderType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "settlement_status"))]
+    pub struct SettlementStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "time_series_interval"))]
     pub struct TimeSeriesInterval;
+}
+
+diesel::table! {
+    accountassetbook (id) {
+        id -> Uuid,
+        asset_id -> Uuid,
+        account_id -> Uuid,
+        associated -> Bool,
+        kyced -> Bool,
+        associated_at -> Nullable<Timestamp>,
+        kyced_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+    }
 }
 
 diesel::table! {
@@ -138,6 +159,7 @@ diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::FillMode;
     use super::sql_types::OrderStatus;
+    use super::sql_types::OrderType;
 
     orderbook (id) {
         id -> Uuid,
@@ -156,9 +178,29 @@ diesel::table! {
         filled_at -> Nullable<Timestamp>,
         cancelled_at -> Nullable<Timestamp>,
         expires_at -> Nullable<Timestamp>,
+        order_type -> OrderType,
     }
 }
 
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::SettlementStatus;
+
+    orderbooktrades (id) {
+        id -> Uuid,
+        maker_order_id -> Uuid,
+        taker_order_id -> Uuid,
+        maker_filled_amount -> Numeric,
+        taker_filled_amount -> Numeric,
+        settlement_tx -> Nullable<Text>,
+        settlement_status -> SettlementStatus,
+        created_at -> Timestamp,
+        settled_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::joinable!(accountassetbook -> asset_book (asset_id));
+diesel::joinable!(accountassetbook -> cradlewalletaccounts (account_id));
 diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
 diesel::joinable!(markets_time_series -> asset_book (asset));
 diesel::joinable!(markets_time_series -> markets (market_id));
@@ -166,10 +208,12 @@ diesel::joinable!(orderbook -> cradlewalletaccounts (wallet));
 diesel::joinable!(orderbook -> markets (market_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    accountassetbook,
     asset_book,
     cradleaccounts,
     cradlewalletaccounts,
     markets,
     markets_time_series,
     orderbook,
+    orderbooktrades,
 );

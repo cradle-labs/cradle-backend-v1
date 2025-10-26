@@ -76,3 +76,28 @@ pub struct CreateCradleWalletAccount {
     pub contract_id: String,
     pub status: Option<CradleWalletStatus>
 }
+
+
+#[derive(Serialize,Deserialize, Queryable, Identifiable, QueryableByName, Clone, Debug)]
+#[diesel(table_name = crate::schema::accountassetbook)]
+pub struct AccountAssetBookRecord {
+    pub id: Uuid,
+    pub asset_id: Uuid,
+    pub account_id: Uuid,
+    pub associated: bool,
+    pub kyced: bool,
+    pub associated_at: Option<NaiveDateTime>,
+    pub kyced_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Serialize,Deserialize, Insertable, Clone, Debug)]
+#[diesel(table_name = crate::schema::accountassetbook)]
+pub struct CreateAccountAssetBook {
+    pub asset_id: Uuid,
+    pub account_id: Uuid,
+    pub associated: Option<bool>,
+    pub kyced: Option<bool>,
+    pub associated_at: Option<NaiveDateTime>,
+    pub kyced_at: Option<NaiveDateTime>,
+}

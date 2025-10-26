@@ -61,10 +61,22 @@ impl ActionProcessor<MarketsConfig, MarketProcessorOutput> for MarketProcessorIn
                 
                 Ok(MarketProcessorOutput::GetMarket(result))
             }
-            MarketProcessorInput::GetMarkets => {
-                // TODO: preempt filters and manually implement them a custom dsl has a tonne of complexity
+            MarketProcessorInput::GetMarkets(filter) => {
+                use crate::schema::markets::dsl::*;
+                let mut query = markets.into_boxed();
+                if let Some(status_filter) = &filter.status {
+                    query = query.filter(market_status.eq(status_filter.clone()));
+                }
+                if let Some(type_filter) = &filter.market_type {
+                    query = query.filter(market_type.eq(type_filter.clone()));
+                }
+                if let Some(regulation_filter) = &filter.regulation {
+                    query = query.filter(market_regulation.eq(regulation_filter.clone()));
+                }
 
-                unimplemented!()
+                let results = query.get_results::<MarketRecord>(app_conn)?;
+
+                Ok(MarketProcessorOutput::GetMarkets(results) )
             }
         }
     }

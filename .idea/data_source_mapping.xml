@@ -8,5 +8,7 @@
     <file url="file://$PROJECT_DIR$/migrations/2025-10-26-080817-0000_markets/up.sql" value="aa4cb215-e5cc-411b-b67c-401bee007b5e" />
     <file url="file://$PROJECT_DIR$/migrations/2025-10-26-112458-0000_orderbook/down.sql" value="aa4cb215-e5cc-411b-b67c-401bee007b5e" />
     <file url="file://$PROJECT_DIR$/migrations/2025-10-26-112458-0000_orderbook/up.sql" value="aa4cb215-e5cc-411b-b67c-401bee007b5e" />
+    <file url="file://$PROJECT_DIR$/migrations/2025-10-26-182020-0000_account_token_book/down.sql" value="aa4cb215-e5cc-411b-b67c-401bee007b5e" />
+    <file url="file://$PROJECT_DIR$/migrations/2025-10-26-182020-0000_account_token_book/up.sql" value="aa4cb215-e5cc-411b-b67c-401bee007b5e" />
   </component>
 </project>

@@ -1,20 +1,25 @@
 use anyhow::anyhow;
 use bigdecimal::ToPrimitive;
+use chrono::Utc;
 use diesel::prelude::*;
 use contract_integrator::utils::functions::{ContractCallInput, ContractCallOutput};
+use contract_integrator::utils::functions::asset_manager::{AssetManagerFunctionInput, AssetManagerFunctionOutput};
 use contract_integrator::utils::functions::cradle_account::{AssociateTokenArgs, CradleAccountFunctionInput, CradleAccountFunctionOutput, WithdrawArgs};
 use contract_integrator::utils::functions::cradle_account_factory::{CradleAccountFactoryFunctionsInput, CradleAccountFactoryFunctionsOutput, CreateAccountInputArgs, GetAccountByControllerInputArgs};
 use diesel::{PgConnection};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use uuid::Uuid;
 use crate::accounts::config::AccountProcessorConfig;
-use crate::accounts::db_types::{CradleAccountRecord, CradleWalletAccountRecord};
+use crate::accounts::db_types::{CradleAccountRecord, CradleWalletAccountRecord, AccountAssetBookRecord, CreateAccountAssetBook};
 use crate::action_router::{ActionRouterInput, ActionRouterOutput};
+use crate::asset_book::db_types::AssetBookRecord;
+use crate::schema::asset_book::dsl::asset_book;
 use crate::utils::app_config::AppConfig;
 use crate::utils::traits::ActionProcessor;
 use super::processor_enums::*;
 use crate::schema::cradleaccounts as CradleAccounts;
 use crate::schema::cradlewalletaccounts as CradleWalletAccounts;
+use crate::schema::cradlewalletaccounts::dsl::cradlewalletaccounts;
 
 impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for AccountsProcessorInput {
     async fn process(&self, app_config: &mut AppConfig, local_config: &mut AccountProcessorConfig, conn: Option<&mut PooledConnection<ConnectionManager<PgConnection>>>) -> anyhow::Result<AccountsProcessorOutput> {
@@ -376,6 +381,128 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                 }else{
                     Err(anyhow!("Unable to find wallet"))
                 }
+            },
+            AccountsProcessorInput::HandleAssociateAssets(wallet_id)=>{
+                use crate::schema::asset_book;
+                use crate::schema::accountassetbook;
+                use crate::schema::cradlewalletaccounts;
+
+                if let Some(action_conn) = conn {
+                    let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts.filter(
+                        cradlewalletaccounts::dsl::id.eq(wallet_id.clone())
+                    ).first::<CradleWalletAccountRecord>(action_conn)?;
+
+                    // find all assets in the assetbook table that the user has not associated yet
+                    let unassociated_tokens = asset_book::dsl::asset_book
+                        .left_join(
+                            accountassetbook::table.on(
+                                accountassetbook::dsl::asset_id.eq(asset_book::dsl::id)
+                                    .and(accountassetbook::dsl::account_id.eq(wallet_id.clone()))
+                            )
+                        )
+                        .filter(accountassetbook::dsl::id.is_null())
+                        .select(asset_book::all_columns)
+                        .get_results::<AssetBookRecord>(action_conn)?;
+
+                    for token in unassociated_tokens {
+                        let res = local_config.wallet.execute(
+                            ContractCallInput::CradleAccount(
+                                CradleAccountFunctionInput::AssociateToken(
+                                    AssociateTokenArgs {
+                                        account_contract_id: wallet.contract_id.clone(),
+                                        token: token.token.clone()
+                                    }
+                                )
+                            )
+                        ).await?;
+
+                        if let ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::AssociateToken(_)) = res {
+                            // insert or update the accountassetbook to reflect the association
+                            let now = Utc::now().naive_utc();
+                            let asset_book_entry = CreateAccountAssetBook {
+                                asset_id: token.id.clone(),
+                                account_id: wallet_id.clone(),
+                                associated: Some(true),
+                                kyced: None,
+                                associated_at: Some(now),
+                                kyced_at: None,
+                            };
+
+                            diesel::insert_into(accountassetbook::table)
+                                .values(&asset_book_entry)
+                                .on_conflict((accountassetbook::dsl::asset_id, accountassetbook::dsl::account_id))
+                                .do_update()
+                                .set((
+                                    accountassetbook::dsl::associated.eq(true),
+                                    accountassetbook::dsl::associated_at.eq(now)
+                                ))
+                                .execute(action_conn)?;
+                        } else {
+                            return Err(anyhow!("Unable to associate token {}", token.token.clone()));
+                        }
+                    }
+                    return Ok(AccountsProcessorOutput::HandleAssociateAssets);
+                }
+
+                Err(anyhow!("Unable to get connection"))
+            }
+            AccountsProcessorInput::HandleKYCAssets(wallet_id)=>{
+                use crate::schema::asset_book;
+                use crate::schema::accountassetbook;
+                use crate::schema::cradlewalletaccounts;
+
+                if let Some(action_conn) = conn {
+                    let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts.filter(
+                        cradlewalletaccounts::dsl::id.eq(wallet_id.clone())
+                    ).first::<CradleWalletAccountRecord>(action_conn)?;
+
+                    // find all assets in the assetbook table that the user has not registered yet
+                    let unassociated_tokens = asset_book::dsl::asset_book
+                        .left_join(
+                            accountassetbook::table.on(
+                                accountassetbook::dsl::asset_id.eq(asset_book::dsl::id)
+                                    .and(accountassetbook::dsl::account_id.eq(wallet_id.clone()))
+                            )
+                        )
+                        .filter(accountassetbook::dsl::id.is_null())
+                        .select(asset_book::all_columns)
+                        .get_results::<AssetBookRecord>(action_conn)?;
+
+                    for token in unassociated_tokens {
+                        let res = app_config.wallet.execute(
+                            ContractCallInput::AssetManager(
+                                AssetManagerFunctionInput::GrantKYC(token.asset_manager, wallet.address.clone())
+                            )
+                        ).await?;
+                        if let ContractCallOutput::AssetManager(AssetManagerFunctionOutput::GrantKYC(_)) = res {
+                            // update the accountassetbook to reflect the KYC grant
+                            let now = Utc::now().naive_utc();
+                            let asset_book_entry = CreateAccountAssetBook {
+                                asset_id: token.id.clone(),
+                                account_id: wallet_id.clone(),
+                                associated: None,
+                                kyced: Some(true),
+                                associated_at: None,
+                                kyced_at: Some(now),
+                            };
+
+                            diesel::insert_into(accountassetbook::table)
+                                .values(&asset_book_entry)
+                                .on_conflict((accountassetbook::dsl::asset_id, accountassetbook::dsl::account_id))
+                                .do_update()
+                                .set((
+                                    accountassetbook::dsl::kyced.eq(true),
+                                    accountassetbook::dsl::kyced_at.eq(now)
+                                ))
+                                .execute(action_conn)?;
+                        } else {
+                            return Err(anyhow!("Unable to grant kyc for token {}", token.token.clone()));
+                        }
+                    }
+                    return Ok(AccountsProcessorOutput::HandleKYCAssets);
+                }
+
+                Err(anyhow!("Unable to get connection"))
             }
         }
     }

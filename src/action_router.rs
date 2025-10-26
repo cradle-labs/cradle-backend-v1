@@ -8,6 +8,7 @@ use crate::asset_book::processor_enums::{AssetBookProcessorInput, AssetBookProce
 use crate::market::processor_enums::{MarketProcessorInput, MarketProcessorOutput};
 use crate::market_time_series::config::MarketTimeSeriesConfig;
 use crate::market_time_series::processor_enum::{MarketTimeSeriesProcessorInput, MarketTimeSeriesProcessorOutput};
+use crate::order_book::processor_enums::{OrderBookProcessorInput, OrderBookProcessorOutput};
 use crate::utils::db::get_conn;
 use crate::utils::traits::ActionProcessor;
 
@@ -15,14 +16,16 @@ pub enum ActionRouterInput {
     Accounts(AccountsProcessorInput),
     AssetBook(AssetBookProcessorInput),
     Markets(MarketProcessorInput),
-    MarketTimeSeries(MarketTimeSeriesProcessorInput)
+    MarketTimeSeries(MarketTimeSeriesProcessorInput),
+    OrderBook(OrderBookProcessorInput)
 }
 
 pub enum ActionRouterOutput {
     Accounts(AccountsProcessorOutput),
     AssetBook(AssetBookProcessorOutput),
     Markets(MarketProcessorOutput),
-    MarketTimeSeries(MarketTimeSeriesProcessorOutput)
+    MarketTimeSeries(MarketTimeSeriesProcessorOutput),
+    OrderBook(OrderBookProcessorOutput)
 }
 
 
@@ -73,6 +76,15 @@ impl ActionRouterInput {
                 let res = processor.process(&mut app_config.clone(), &mut config, Some(&mut conn)).await?;
 
                 Ok(ActionRouterOutput::MarketTimeSeries(res))
+            },
+            ActionRouterInput::OrderBook(processor)=> {
+                let mut conn = get_conn(app_config.pool.clone())?;
+
+                let mut config = crate::order_book::config::OrderBookConfig {};
+
+                let res = processor.process(&mut app_config.clone(), &mut config, Some(&mut conn)).await?;
+
+                Ok(ActionRouterOutput::OrderBook(res))
             }
         }
     }

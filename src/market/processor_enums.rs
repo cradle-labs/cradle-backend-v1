@@ -22,7 +22,12 @@ pub struct UpdateMarketRegulationInputArgs {
     pub regulation: MarketRegulation
 }
 
-
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct GetMarketsFilter {
+    pub status: Option<MarketStatus>,
+    pub market_type: Option<MarketType>,
+    pub regulation: Option<MarketRegulation>
+}
 
 pub enum MarketProcessorInput {
     CreateMarket(CreateMarket),
@@ -30,7 +35,7 @@ pub enum MarketProcessorInput {
     UpdateMarketType(UpdateMarketTypeInputArgs),
     UpdateMarketRegulation(UpdateMarketRegulationInputArgs),
     GetMarket(Uuid),
-    GetMarkets
+    GetMarkets(GetMarketsFilter)
 }
 
 
