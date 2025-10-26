@@ -2,6 +2,10 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "asset_type"))]
+    pub struct AssetType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "cradleaccountstatus"))]
     pub struct Cradleaccountstatus;
 
@@ -12,6 +16,51 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "cradlewalletstatus"))]
     pub struct Cradlewalletstatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "data_provider_type"))]
+    pub struct DataProviderType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "fill_mode"))]
+    pub struct FillMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "market_regulation"))]
+    pub struct MarketRegulation;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "market_status"))]
+    pub struct MarketStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "market_type"))]
+    pub struct MarketType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "order_status"))]
+    pub struct OrderStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "time_series_interval"))]
+    pub struct TimeSeriesInterval;
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::AssetType;
+
+    asset_book (id) {
+        id -> Uuid,
+        asset_manager -> Text,
+        token -> Text,
+        created_at -> Timestamp,
+        asset_type -> AssetType,
+        name -> Text,
+        symbol -> Text,
+        decimals -> Int4,
+        icon -> Nullable<Text>,
+    }
 }
 
 diesel::table! {
@@ -42,6 +91,85 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MarketType;
+    use super::sql_types::MarketStatus;
+    use super::sql_types::MarketRegulation;
 
-diesel::allow_tables_to_appear_in_same_query!(cradleaccounts, cradlewalletaccounts,);
+    markets (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Nullable<Text>,
+        icon -> Nullable<Text>,
+        asset_one -> Uuid,
+        asset_two -> Uuid,
+        created_at -> Timestamp,
+        market_type -> MarketType,
+        market_status -> MarketStatus,
+        market_regulation -> MarketRegulation,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::TimeSeriesInterval;
+    use super::sql_types::DataProviderType;
+
+    markets_time_series (id) {
+        id -> Uuid,
+        market_id -> Uuid,
+        asset -> Uuid,
+        open -> Numeric,
+        high -> Numeric,
+        low -> Numeric,
+        close -> Numeric,
+        volume -> Numeric,
+        created_at -> Timestamp,
+        start_time -> Timestamp,
+        end_time -> Timestamp,
+        interval -> TimeSeriesInterval,
+        data_provider_type -> DataProviderType,
+        data_provider -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::FillMode;
+    use super::sql_types::OrderStatus;
+
+    orderbook (id) {
+        id -> Uuid,
+        wallet -> Uuid,
+        market_id -> Uuid,
+        bid_asset -> Uuid,
+        ask_asset -> Uuid,
+        bid_amount -> Numeric,
+        ask_amount -> Numeric,
+        price -> Numeric,
+        filled_bid_amount -> Numeric,
+        filled_ask_amount -> Numeric,
+        mode -> FillMode,
+        status -> OrderStatus,
+        created_at -> Timestamp,
+        filled_at -> Nullable<Timestamp>,
+        cancelled_at -> Nullable<Timestamp>,
+        expires_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
+diesel::joinable!(markets_time_series -> asset_book (asset));
+diesel::joinable!(markets_time_series -> markets (market_id));
+diesel::joinable!(orderbook -> cradlewalletaccounts (wallet));
+diesel::joinable!(orderbook -> markets (market_id));
+
+diesel::allow_tables_to_appear_in_same_query!(
+    asset_book,
+    cradleaccounts,
+    cradlewalletaccounts,
+    markets,
+    markets_time_series,
+    orderbook,
+);

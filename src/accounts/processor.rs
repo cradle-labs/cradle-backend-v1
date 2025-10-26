@@ -17,7 +17,7 @@ use crate::schema::cradleaccounts as CradleAccounts;
 use crate::schema::cradlewalletaccounts as CradleWalletAccounts;
 
 impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for AccountsProcessorInput {
-    async fn process(&self, app_config: AppConfig, local_config: &mut AccountProcessorConfig, conn: Option<&mut PooledConnection<ConnectionManager<PgConnection>>>) -> anyhow::Result<AccountsProcessorOutput> {
+    async fn process(&self, app_config: &mut AppConfig, local_config: &mut AccountProcessorConfig, conn: Option<&mut PooledConnection<ConnectionManager<PgConnection>>>) -> anyhow::Result<AccountsProcessorOutput> {
 
         match self {
             AccountsProcessorInput::CreateAccount(args) => {

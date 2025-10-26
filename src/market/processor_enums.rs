@@ -1,0 +1,45 @@
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use crate::market::db_types::{CreateMarket, MarketRecord, MarketRegulation, MarketStatus, MarketType};
+
+
+
+#[derive(Deserialize,Serialize)]
+pub struct UpdateMarketStatusInputArgs {
+    pub market_id: Uuid,
+    pub status: MarketStatus
+}
+
+#[derive(Deserialize,Serialize)]
+pub struct UpdateMarketTypeInputArgs {
+    pub market_id: Uuid,
+    pub market_type: MarketType
+}
+
+#[derive(Deserialize,Serialize)]
+pub struct UpdateMarketRegulationInputArgs {
+    pub market_id: Uuid,
+    pub regulation: MarketRegulation
+}
+
+
+
+pub enum MarketProcessorInput {
+    CreateMarket(CreateMarket),
+    UpdateMarketStatus(UpdateMarketStatusInputArgs),
+    UpdateMarketType(UpdateMarketTypeInputArgs),
+    UpdateMarketRegulation(UpdateMarketRegulationInputArgs),
+    GetMarket(Uuid),
+    GetMarkets
+}
+
+
+
+pub enum MarketProcessorOutput {
+    CreateMarket(Uuid),
+    UpdateMarketStatus,
+    UpdateMarketType,
+    UpdateMarketRegulation,
+    GetMarket(MarketRecord),
+    GetMarkets(Vec<MarketRecord>)
+}
