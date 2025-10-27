@@ -21,20 +21,20 @@ pub struct CreateExistingAssetInputArgs {
     pub decimals: i32,
     pub icon: String
 }
-
+#[derive(Deserialize, Serialize)]
 pub enum GetAssetInputArgs {
     ById(Uuid),
     ByToken(String),
     ByAssetManager(String)
 }
-
+#[derive(Deserialize, Serialize)]
 pub enum AssetBookProcessorInput {
     CreateNewAsset(CreateNewAssetInputArgs),
     CreateExistingAsset(CreateExistingAssetInputArgs),
     GetAsset(GetAssetInputArgs)
 }
 
-
+#[derive(Deserialize, Serialize)]
 pub enum AssetBookProcessorOutput {
     CreateNewAsset(Uuid),
     CreateExistingAsset(Uuid),

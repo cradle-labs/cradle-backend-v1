@@ -85,6 +85,7 @@ pub struct WithdrawTokensInputArgs {
     pub from: Uuid
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum AccountsProcessorInput {
     CreateAccount(CreateCradleAccount),
     CreateAccountWallet(CreateCradleWalletInputArgs),
@@ -117,6 +118,7 @@ pub struct CreateAccountWalletOutputArgs {
     pub id: Uuid
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum AccountsProcessorOutput {
     CreateAccount(CreateAccountOutputArgs),
     CreateAccountWallet(CreateAccountWalletOutputArgs),

@@ -16,3 +16,9 @@ serde_json = {version = "1.0.145", features = ["preserve_order"]}
 tokio = { version =  "1.48.0", features = ["full"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 contract-integrator = { path = "../cradle-dev/cradle-offchain/contract-integrator" }
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+hyper = "1"

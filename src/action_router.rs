@@ -2,6 +2,7 @@ use crate::accounts::processor_enums::{AccountsProcessorInput, AccountsProcessor
 use crate::utils::app_config::AppConfig;
 use anyhow::Result;
 use contract_integrator::wallet::wallet::ActionWallet;
+use serde::{Deserialize, Serialize};
 use crate::accounts::config::AccountProcessorConfig;
 use crate::asset_book::config::AssetBookConfig;
 use crate::asset_book::processor_enums::{AssetBookProcessorInput, AssetBookProcessorOutput};
@@ -13,6 +14,7 @@ use crate::order_book::processor_enums::{OrderBookProcessorInput, OrderBookProce
 use crate::utils::db::get_conn;
 use crate::utils::traits::ActionProcessor;
 
+#[derive(Deserialize, Serialize)]
 pub enum ActionRouterInput {
     Accounts(AccountsProcessorInput),
     AssetBook(AssetBookProcessorInput),
@@ -22,6 +24,7 @@ pub enum ActionRouterInput {
     Pool(LendingPoolFunctionsInput)
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum ActionRouterOutput {
     Accounts(AccountsProcessorOutput),
     AssetBook(AssetBookProcessorOutput),
