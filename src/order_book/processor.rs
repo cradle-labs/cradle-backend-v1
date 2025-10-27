@@ -27,11 +27,7 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
         use crate::schema::asset_book;
         match self {
             OrderBookProcessorInput::PlaceOrder(args) => {
-                let order = diesel::insert_into(orderbook::table)
-                    .values(args.clone())
-                    .get_result::<OrderBookRecord>(app_conn)?;
-
-                // TODO: Lock assets in wallet
+                // Lock assets in wallet before anything
                 let lock_asset_request = ActionRouterInput::OrderBook(
                     OrderBookProcessorInput::LockWalletAssets(
                         args.wallet.clone(),
@@ -41,6 +37,11 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 );
 
                 let _ = Box::pin(lock_asset_request.process(app_config.clone())).await?;
+                
+                let order = diesel::insert_into(orderbook::table)
+                    .values(args.clone())
+                    .get_result::<OrderBookRecord>(app_conn)?;
+
 
                 let matching_orders = get_matching_orders(app_conn, order.id.clone()).await?;
                 let (remaining_bid, unfilled_ask, trades) = get_order_fill_trades(&order, matching_orders);

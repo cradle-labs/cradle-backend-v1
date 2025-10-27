@@ -5,6 +5,7 @@ use contract_integrator::wallet::wallet::ActionWallet;
 use crate::accounts::config::AccountProcessorConfig;
 use crate::asset_book::config::AssetBookConfig;
 use crate::asset_book::processor_enums::{AssetBookProcessorInput, AssetBookProcessorOutput};
+use crate::lending_pool::processor_enums::{LendingPoolFunctionsInput, LendingPoolFunctionsOutput};
 use crate::market::processor_enums::{MarketProcessorInput, MarketProcessorOutput};
 use crate::market_time_series::config::MarketTimeSeriesConfig;
 use crate::market_time_series::processor_enum::{MarketTimeSeriesProcessorInput, MarketTimeSeriesProcessorOutput};
@@ -17,7 +18,8 @@ pub enum ActionRouterInput {
     AssetBook(AssetBookProcessorInput),
     Markets(MarketProcessorInput),
     MarketTimeSeries(MarketTimeSeriesProcessorInput),
-    OrderBook(OrderBookProcessorInput)
+    OrderBook(OrderBookProcessorInput),
+    Pool(LendingPoolFunctionsInput)
 }
 
 pub enum ActionRouterOutput {
@@ -25,7 +27,8 @@ pub enum ActionRouterOutput {
     AssetBook(AssetBookProcessorOutput),
     Markets(MarketProcessorOutput),
     MarketTimeSeries(MarketTimeSeriesProcessorOutput),
-    OrderBook(OrderBookProcessorOutput)
+    OrderBook(OrderBookProcessorOutput),
+    Pool(LendingPoolFunctionsOutput)
 }
 
 
@@ -85,6 +88,16 @@ impl ActionRouterInput {
                 let res = processor.process(&mut app_config.clone(), &mut config, Some(&mut conn)).await?;
 
                 Ok(ActionRouterOutput::OrderBook(res))
+            },
+            ActionRouterInput::Pool(processor)=>{
+                let mut conn = get_conn(app_config.pool.clone())?;
+
+                let mut config = crate::lending_pool::config::LendingPoolConfig {
+                };
+
+                let res = processor.process(&mut app_config.clone(), &mut config, Some(&mut conn)).await?;
+
+                Ok(ActionRouterOutput::Pool(res))
             }
         }
     }

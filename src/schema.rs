@@ -26,6 +26,10 @@ pub mod sql_types {
     pub struct FillMode;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "loan_status"))]
+    pub struct LoanStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "market_regulation"))]
     pub struct MarketRegulation;
 
@@ -44,6 +48,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "order_type"))]
     pub struct OrderType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "pool_transaction_type"))]
+    pub struct PoolTransactionType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "settlement_status"))]
@@ -109,6 +117,79 @@ diesel::table! {
         contract_id -> Text,
         created_at -> Timestamp,
         status -> Cradlewalletstatus,
+    }
+}
+
+diesel::table! {
+    lendingpool (id) {
+        id -> Uuid,
+        pool_address -> Text,
+        pool_contract_id -> Text,
+        reserve_asset -> Uuid,
+        loan_to_value -> Numeric,
+        base_rate -> Numeric,
+        slope1 -> Numeric,
+        slope2 -> Numeric,
+        liquidation_threshold -> Numeric,
+        liquidation_discount -> Numeric,
+        reserve_factor -> Numeric,
+        name -> Nullable<Text>,
+        title -> Nullable<Text>,
+        description -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    lendingpoolsnapshots (id) {
+        id -> Uuid,
+        lending_pool_id -> Uuid,
+        total_supply -> Numeric,
+        total_borrow -> Numeric,
+        available_liquidity -> Numeric,
+        utilization_rate -> Numeric,
+        supply_apy -> Numeric,
+        borrow_apy -> Numeric,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    loanliquidations (id) {
+        id -> Uuid,
+        loan_id -> Uuid,
+        liquidator_wallet_id -> Uuid,
+        liquidation_amount -> Numeric,
+        liquidation_date -> Timestamp,
+        transaction -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    loanrepayments (id) {
+        id -> Uuid,
+        loan_id -> Uuid,
+        repayment_amount -> Numeric,
+        repayment_date -> Timestamp,
+        transaction -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::LoanStatus;
+
+    loans (id) {
+        id -> Uuid,
+        account_id -> Uuid,
+        wallet_id -> Uuid,
+        pool -> Uuid,
+        borrow_index -> Numeric,
+        principal_amount -> Numeric,
+        created_at -> Timestamp,
+        status -> LoanStatus,
+        transaction -> Nullable<Text>,
     }
 }
 
@@ -199,21 +280,55 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::PoolTransactionType;
+
+    pooltransactions (id) {
+        id -> Uuid,
+        pool_id -> Uuid,
+        wallet_id -> Uuid,
+        amount -> Numeric,
+        supply_index -> Numeric,
+        transaction_type -> PoolTransactionType,
+        yield_token_amount -> Numeric,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+        transaction -> Text,
+    }
+}
+
 diesel::joinable!(accountassetbook -> asset_book (asset_id));
 diesel::joinable!(accountassetbook -> cradlewalletaccounts (account_id));
 diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
+diesel::joinable!(lendingpool -> asset_book (reserve_asset));
+diesel::joinable!(lendingpoolsnapshots -> lendingpool (lending_pool_id));
+diesel::joinable!(loanliquidations -> cradlewalletaccounts (liquidator_wallet_id));
+diesel::joinable!(loanliquidations -> loans (loan_id));
+diesel::joinable!(loanrepayments -> loans (loan_id));
+diesel::joinable!(loans -> cradleaccounts (account_id));
+diesel::joinable!(loans -> cradlewalletaccounts (wallet_id));
+diesel::joinable!(loans -> lendingpool (pool));
 diesel::joinable!(markets_time_series -> asset_book (asset));
 diesel::joinable!(markets_time_series -> markets (market_id));
 diesel::joinable!(orderbook -> cradlewalletaccounts (wallet));
 diesel::joinable!(orderbook -> markets (market_id));
+diesel::joinable!(pooltransactions -> cradlewalletaccounts (wallet_id));
+diesel::joinable!(pooltransactions -> lendingpool (pool_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     accountassetbook,
     asset_book,
     cradleaccounts,
     cradlewalletaccounts,
+    lendingpool,
+    lendingpoolsnapshots,
+    loanliquidations,
+    loanrepayments,
+    loans,
     markets,
     markets_time_series,
     orderbook,
     orderbooktrades,
+    pooltransactions,
 );

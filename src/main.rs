@@ -6,6 +6,7 @@ mod asset_book;
 mod market;
 mod market_time_series;
 mod order_book;
+mod lending_pool;
 
 fn main() {
     println!("Hello, world!");
