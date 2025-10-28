@@ -60,13 +60,13 @@ pub enum DeleteWalletInputArgs {
 #[derive(Deserialize,Serialize)]
 pub struct AssociateTokenToWalletInputArgs {
     pub wallet_id: Uuid,
-    pub token: String
+    pub token: Uuid
 }
 
 #[derive(Deserialize,Serialize)]
 pub struct GrantKYCInputArgs {
     pub wallet_id: Uuid,
-    pub token: String
+    pub token: Uuid // for backward comp with current client sdk
 }
 
 

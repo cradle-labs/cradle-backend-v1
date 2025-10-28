@@ -20,7 +20,8 @@ pub enum CradleAccountType {
 #[serde(rename_all = "lowercase")]
 pub enum CradleWalletStatus {
     Active,
-    InActive,
+    #[serde(rename = "inactive")]
+    Inactive,
     Suspended
 }
 

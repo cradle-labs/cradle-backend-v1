@@ -1,8 +1,9 @@
 use diesel::PgConnection;
 use diesel::prelude::*;
-use diesel::r2d2::ConnectionManager;
+use diesel::r2d2::{ConnectionManager, Pool};
 use anyhow::Result;
 use contract_integrator::wallet::wallet::ActionWallet;
+use dotenvy::dotenv;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -19,7 +20,15 @@ impl AppConfig {
     }
 
     pub fn from_env()->Result<Self>{
+        dotenv()?;
 
-        todo!("Implement app config from env")
+        let DATABASE_URL = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set in .env file or environment variables");
+        let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL);
+        let pool = Pool::new(manager)?;
+
+        let wallet = ActionWallet::from_env();
+
+        Ok(Self::new(pool, wallet))
     }
 }
