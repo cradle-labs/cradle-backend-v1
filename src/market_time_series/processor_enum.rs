@@ -13,11 +13,13 @@ pub struct GetHistoryInputArgs {
     pub interval: TimeSeriesInterval
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum MarketTimeSeriesProcessorInput {
     AddRecord(CreateMarketTimeSeriesRecord),
     GetHistory(GetHistoryInputArgs)
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum MarketTimeSeriesProcessorOutput {
     AddRecord(Uuid),
     GetHistory(Vec<MarketTimeSeriesRecord>)

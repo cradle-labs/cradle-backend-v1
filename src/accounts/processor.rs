@@ -1,8 +1,9 @@
 use anyhow::anyhow;
 use bigdecimal::ToPrimitive;
 use chrono::Utc;
+use contract_integrator::hedera::ContractId;
 use diesel::prelude::*;
-use contract_integrator::utils::functions::{ContractCallInput, ContractCallOutput};
+use contract_integrator::utils::functions::{commons, ContractCallInput, ContractCallOutput};
 use contract_integrator::utils::functions::asset_manager::{AssetManagerFunctionInput, AssetManagerFunctionOutput};
 use contract_integrator::utils::functions::cradle_account::{AssociateTokenArgs, CradleAccountFunctionInput, CradleAccountFunctionOutput, WithdrawArgs};
 use contract_integrator::utils::functions::cradle_account_factory::{CradleAccountFactoryFunctionsInput, CradleAccountFactoryFunctionsOutput, CreateAccountInputArgs, GetAccountByControllerInputArgs};
@@ -13,7 +14,7 @@ use crate::accounts::config::AccountProcessorConfig;
 use crate::accounts::db_types::{CradleAccountRecord, CradleWalletAccountRecord, AccountAssetBookRecord, CreateAccountAssetBook};
 use crate::action_router::{ActionRouterInput, ActionRouterOutput};
 use crate::asset_book::db_types::AssetBookRecord;
-use crate::schema::asset_book::dsl::asset_book;
+use crate::schema::asset_book::dsl as AssetBookDsl;
 use crate::utils::app_config::AppConfig;
 use crate::utils::traits::ActionProcessor;
 use super::processor_enums::*;
@@ -80,28 +81,19 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                     ).await?;
 
 
-                    if let ContractCallOutput::CradleAccountFactory(CradleAccountFactoryFunctionsOutput::CreateAccount(_)) = res {
+                    if let ContractCallOutput::CradleAccountFactory(CradleAccountFactoryFunctionsOutput::CreateAccount(output)) = res {
                         // TODO: do something with the result
 
-                        let call_res = local_config.wallet.execute(
-                            ContractCallInput::CradleAccountFactory(
-                                CradleAccountFactoryFunctionsInput::GetAccountByController(
-                                    GetAccountByControllerInputArgs {
-                                        controller: args.cradle_account_id.to_string()
-                                    }
-                                )
-                            )
-                        ).await?;
-
-
-                        if let ContractCallOutput::CradleAccountFactory(CradleAccountFactoryFunctionsOutput::GetAccountByController(output)) = call_res {
-
-                            let wallet_address = output.output.expect("Address not found");
-
+                        let wallet_contract_address = output.output.ok_or_else(||anyhow!("Failed to get wallet address"))?.account_address;
+                            println!("Wallet contract address:: {}", wallet_contract_address.clone());
+                            let contract_id_value = commons::get_contract_id_from_evm_address(wallet_contract_address.as_str()).await?;
+                            println!("Contract ID: {:?}", contract_id_value.clone());
+                            let as_str_value = contract_id_value.to_string();
+                            println!("Contract ID as String: {}", as_str_value);
                             let action_data = super::db_types::CreateCradleWalletAccount {
                               cradle_account_id: args.cradle_account_id.clone(),
-                                contract_id: contract_integrator::hedera::ContractId::from_solidity_address(&wallet_address.account_address)?.to_string(),
-                                address: wallet_address.account_address,
+                                contract_id: as_str_value,
+                                address: wallet_contract_address,
                                 status: args.status.clone()
                             };
 
@@ -113,7 +105,6 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                             }));
 
 
-                        }
 
                     }else {
                         return Err(anyhow!("Failed to  create account with factory contract"));
@@ -285,11 +276,15 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
             },
             AccountsProcessorInput::AssociateTokenToWallet(args)=>{
 
-                    let wallet_req = ActionRouterInput::Accounts(
-                        AccountsProcessorInput::GetWallet(
-                            GetWalletInputArgs::ById(args.wallet_id)
-                        )
-                    );
+                let wallet_req = ActionRouterInput::Accounts(
+                    AccountsProcessorInput::GetWallet(
+                        GetWalletInputArgs::ById(args.wallet_id)
+                    )
+                );
+
+                let token = AssetBookDsl::asset_book.filter(
+                    AssetBookDsl::id.eq(args.token)
+                ).get_result::<AssetBookRecord>(conn.ok_or_else(||anyhow!("Unable to get connection"))?)?;
 
                     let res = Box::pin(wallet_req.process(app_config.clone())).await?;
 
@@ -300,7 +295,7 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                                 CradleAccountFunctionInput::AssociateToken(
                                     AssociateTokenArgs {
                                         account_contract_id:wallet.contract_id,
-                                        token: args.token.clone()
+                                        token: token.token
                                     }
                                 )
                             )
@@ -308,6 +303,7 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
 
 
                         return if let ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::AssociateToken(out)) = res {
+                            println!("Out :: {:?}", out.transaction_id);
                             // TODO: record token somewhere
 
                             Ok(AccountsProcessorOutput::AssociateTokenToWallet)
@@ -328,11 +324,32 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                     )
                 );
 
+                let app_conn = conn.ok_or_else(||anyhow!("Unable to get connection"))?;
+
+                let token_record = AssetBookDsl::asset_book.filter(
+                    AssetBookDsl::id.eq(args.token)
+                ).get_result::<AssetBookRecord>(app_conn)?;
+
                 let res = Box::pin(wallet_req.process(app_config.clone())).await?;
 
                 if let ActionRouterOutput::Accounts(AccountsProcessorOutput::GetWallet(wallet)) = res {
 
-                    todo!("Yet to figure out how to resolve tokens and token managers")
+                    let res = app_config.wallet.execute(
+                        ContractCallInput::AssetManager(
+                            AssetManagerFunctionInput::GrantKYC(
+                                token_record.asset_manager,
+                                wallet.address.clone()
+                            )
+                        )
+                    ).await?;
+
+                    if let ContractCallOutput::AssetManager(AssetManagerFunctionOutput::GrantKYC(output)) = res {
+                        println!("Grant kyc:: {}", output.transaction_id);
+                        Ok(AccountsProcessorOutput::GrantKYC)
+                    } else {
+                        Err(anyhow!("Unable to grant kyc"))
+
+                    }
 
 
                 }else{

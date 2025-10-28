@@ -11,6 +11,8 @@ pub struct GetOrdersFilter {
     pub order_type: Option<OrderType>,
     pub mode: Option<FillMode>
 }
+
+#[derive(Deserialize, Serialize)]
 pub enum OrderBookProcessorInput {
     PlaceOrder(NewOrderBookRecord),
     UpdateOrderFill(Uuid, BigDecimal, BigDecimal, Vec<CreateOrderBookTrade>),
@@ -22,6 +24,7 @@ pub enum OrderBookProcessorInput {
     UnLockWalletAssets(Uuid, Uuid, BigDecimal)
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum OrderFillStatus {
     Partial,
     Filled,
@@ -30,6 +33,7 @@ pub enum OrderFillStatus {
 
 
 
+#[derive(Deserialize, Serialize)]
 pub struct OrderFillResult {
     pub id: Uuid,
     pub status: OrderFillStatus,
@@ -39,6 +43,7 @@ pub struct OrderFillResult {
 }
 
 
+#[derive(Deserialize, Serialize)]
 pub enum OrderBookProcessorOutput {
     PlaceOrder(OrderFillResult),
     SettleOrder,
