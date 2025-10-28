@@ -13,8 +13,11 @@ use crate::schema::asset_book as AssetBook;
 pub enum AssetType {
     Bridged,
     Native,
-    Yield_Breaking,
+    #[serde(rename = "yield_bearing")]
+    Yield_Bearing,
+    #[serde(rename = "chain_native")]
     Chain_Native,
+    #[serde(rename = "stablecoin")]
     StableCoin,
     Volatile
 }

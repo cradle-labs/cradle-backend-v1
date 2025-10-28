@@ -16,6 +16,7 @@ use axum::{
     Router,
 };
 use std::env;
+use dotenvy::dotenv;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber;
 
@@ -32,6 +33,7 @@ use utils::app_config::AppConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv()?;
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -113,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Get port from environment or use default
     let port = env::var("PORT")
-        .unwrap_or_else(|_| "3000".to_string())
+        .unwrap_or_else(|_| "6969".to_string())
         .parse::<u16>()
         .unwrap_or(3000);
 
