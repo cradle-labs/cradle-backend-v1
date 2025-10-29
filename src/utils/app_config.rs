@@ -20,7 +20,7 @@ impl AppConfig {
     }
 
     pub fn from_env()->Result<Self>{
-        dotenv()?;
+        let _ = dotenv();
 
         let DATABASE_URL = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set in .env file or environment variables");
