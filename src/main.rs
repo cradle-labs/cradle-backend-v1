@@ -33,7 +33,7 @@ use utils::app_config::AppConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv()?;
+    let _ = dotenv();
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
