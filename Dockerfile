@@ -44,7 +44,10 @@ WORKDIR /app
 COPY --from=builder /app/target/release/cradle-back-end /app/cradle-back-end
 
 # Change ownership to app user
-RUN chown appuser:appuser /app/cradle-back-end
+RUN chown appuser:appuser /app/cradle-back-end && chmod +x /app/cradle-back-end
+
+# Debug: verify binary exists
+RUN ls -lah /app/cradle-back-end
 
 # Switch to non-root user
 USER appuser
