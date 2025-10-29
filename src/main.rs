@@ -17,6 +17,7 @@ use axum::{
 };
 use std::env;
 use dotenvy::dotenv;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber;
 
@@ -109,6 +110,7 @@ async fn main() -> anyhow::Result<()> {
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())
         .layer(auth_layer)
+        .layer(CorsLayer::permissive())// TODO: temp redo correctly once we have a domain
 
         // Shared state - applied after middleware
         .with_state(app_config);
