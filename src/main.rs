@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/assets/:id", get(get_asset_by_id))
         .route("/assets/token/:token", get(get_asset_by_token))
         .route("/assets/manager/:manager", get(get_asset_by_manager))
+        .route("/assets", get(get_assets))
 
         // Markets endpoints
         .route("/markets/:id", get(get_market_by_id))
