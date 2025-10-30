@@ -46,8 +46,7 @@ fn main() -> Result<()> {
         eprintln!();
 
         // Launch the selected CLI binary
-        let status = Command::new(format!("cargo"))
-            .args(&["run", "--bin", binary, "--release"])
+        let status = Command::new(format!("./target/debug/{}",binary))
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .stdin(Stdio::inherit())

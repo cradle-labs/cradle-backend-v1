@@ -65,6 +65,7 @@ pub struct AssociateTokenToWalletInputArgs {
 
 #[derive(Deserialize,Serialize, Debug)]
 pub struct GrantKYCInputArgs {
+
     pub wallet_id: Uuid,
     pub token: Uuid // for backward comp with current client sdk
 }
