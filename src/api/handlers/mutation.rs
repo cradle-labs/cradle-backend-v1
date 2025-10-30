@@ -1,6 +1,6 @@
 use axum::{extract::State, Json};
 use serde_json::Value;
-
+use socketioxide::SocketIo;
 use crate::{
     action_router::{ActionRouterInput, ActionRouterOutput},
     api::{error::ApiError, extractors::ActionRouterExtractor, response::ApiResponse},
@@ -15,8 +15,10 @@ use crate::{
 /// or any other valid ActionRouterInput variant
 pub async fn process_mutation(
     State(app_config): State<AppConfig>,
+    // State(io): State<SocketIo>,
     ActionRouterExtractor(payload): ActionRouterExtractor,
 ) -> Result<Json<ApiResponse<Value>>, ApiError> {
+    // app_config.set_io(io);
     // Deserialize the JSON into ActionRouterInput
     let action_input: ActionRouterInput = serde_json::from_value(payload)
         .map_err(|e| {

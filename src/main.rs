@@ -8,6 +8,8 @@ mod market;
 mod market_time_series;
 mod order_book;
 mod lending_pool;
+mod sockets;
+mod aggregators;
 
 use axum::{
     middleware::{self, Next},
@@ -20,6 +22,9 @@ use dotenvy::dotenv;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber;
+use socketioxide::{
+    SocketIo
+};
 
 use api::{
     config::ApiConfig,
@@ -31,6 +36,7 @@ use api::{
     middleware::auth::validate_auth,
 };
 use utils::app_config::AppConfig;
+use crate::sockets::on_connect;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -44,12 +50,18 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let (socket_layer, io) = SocketIo::new_layer();
+
+    io.ns("/", on_connect);
+
     // Load API configuration
     let api_config = ApiConfig::from_env();
+
     tracing::info!("API configuration loaded successfully");
 
     // Load AppConfig (database and wallet)
-    let app_config = AppConfig::from_env()?;
+    let mut app_config = AppConfig::from_env()?;
+    app_config.set_io(io);
     tracing::info!("Application configuration loaded successfully");
 
     // Create authentication middleware that captures the secret key
@@ -110,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())
         .layer(auth_layer)
+        .layer(socket_layer)
         .layer(CorsLayer::permissive())// TODO: temp redo correctly once we have a domain
 
         // Shared state - applied after middleware

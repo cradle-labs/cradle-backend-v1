@@ -23,6 +23,9 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hyper = "1"
+socketioxide = "0.18.0"
+dialoguer = { version = "0.11", features = ["password"] }
+colored = "2.1"
 
 [net]
 git-fetch-with-cli = true

@@ -1,21 +1,24 @@
 use diesel::PgConnection;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use contract_integrator::wallet::wallet::ActionWallet;
 use dotenvy::dotenv;
+use socketioxide::SocketIo;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub pool: diesel::r2d2::Pool<ConnectionManager<PgConnection>>,
-    pub wallet: ActionWallet
+    pub wallet: ActionWallet,
+    io: Option<SocketIo>
 }
 
 impl AppConfig {
     pub fn new(pool: diesel::r2d2::Pool<ConnectionManager<PgConnection>>, wallet: ActionWallet)-> Self {
         Self {
             pool,
-            wallet
+            wallet,
+            io: None
         }
     }
 
@@ -30,5 +33,13 @@ impl AppConfig {
         let wallet = ActionWallet::from_env();
 
         Ok(Self::new(pool, wallet))
+    }
+
+    pub fn set_io(&mut self, io: SocketIo){
+        self.io = Some(io);
+    }
+
+    pub fn get_io(&self)->Result<SocketIo> {
+        self.io.clone().ok_or_else(||anyhow!("Failed to get socket io"))
     }
 }

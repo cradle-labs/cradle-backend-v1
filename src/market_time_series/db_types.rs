@@ -9,6 +9,12 @@ use crate::schema::markets_time_series as MarketsTimeSeriesTable;
 #[derive(Deserialize,Serialize, Debug, Clone, DbEnum)]
 #[ExistingTypePath="crate::schema::sql_types::TimeSeriesInterval"]
 pub enum TimeSeriesInterval {
+    #[serde(rename = "15secs")]
+    FifteenSecs,
+    #[serde(rename = "30secs")]
+    ThirtySecs,
+    #[serde(rename = "45secs")]
+    FortyFiveSecs,
     #[serde(rename = "1min")]
     OneMinute,
     #[serde(rename = "5min")]

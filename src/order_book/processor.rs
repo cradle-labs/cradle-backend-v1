@@ -7,6 +7,7 @@ use contract_integrator::utils::functions::orderbook_settler::{OrderBookSettlerF
 use diesel::PgConnection;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
+use serde_json::json;
 use uuid::Uuid;
 use crate::accounts::db_types::CradleWalletAccountRecord;
 use crate::action_router::ActionRouterInput;
@@ -21,6 +22,7 @@ use crate::utils::traits::ActionProcessor;
 impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookProcessorInput {
     async fn process(&self, app_config: &mut AppConfig, local_config: &mut OrderBookConfig, conn: Option<&mut PooledConnection<ConnectionManager<PgConnection>>>) -> anyhow::Result<OrderBookProcessorOutput> {
         let app_conn = conn.ok_or_else(||anyhow!("Unable to get conn"))?;
+        let io_conn = app_config.get_io()?;
         use crate::schema::orderbook;
         use crate::schema::orderbooktrades;
         use crate::schema::cradlewalletaccounts;
@@ -42,6 +44,7 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     .values(args.clone())
                     .get_result::<OrderBookRecord>(app_conn)?;
 
+                io_conn.to(format!("realtime_market_orders_{}", args.market_id)).emit("new-order", &order).await.map_err(|e|anyhow!("Broadcast error {}",e))?;
 
                 let matching_orders = get_matching_orders(app_conn, order.id.clone()).await?;
                 let (remaining_bid, unfilled_ask, trades) = get_order_fill_trades(&order, matching_orders);
@@ -129,10 +132,11 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 ).get_results::<crate::order_book::db_types::OrderBookTradeRecord>(app_conn)?;
 
 
-                for trade in trades {
+                for trade in trades.clone() {
                     let maker_order = orderbook::dsl::orderbook.filter(
                         orderbook::id.eq(trade.maker_order_id.clone())
                     ).get_result::<OrderBookRecord>(app_conn)?;
+
 
                     let marker_asset = asset_book::dsl::asset_book.filter(
                         asset_book::id.eq(maker_order.ask_asset.clone())
@@ -185,6 +189,10 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     }
                 }
 
+                io_conn.to(format!("order_{}", order_id)).emit("settled", &json!({
+                    "trades": trades.clone()
+                })).await.map_err(|e|anyhow!("Failed to send to room {}", e))?;
+
                 Ok(OrderBookProcessorOutput::SettleOrder)
             }
             OrderBookProcessorInput::UpdateOrderFill(order_id, remaining_bid, unfilled_ask, trades)=>{
@@ -214,6 +222,9 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                         new_filled_bid
                     )
                 );
+
+                io_conn.to(format!("order_{}", order_id)).emit("order-filled", &json!({})).await.map_err(|e|anyhow!("Unable to send broadcast {} ", e))?;
+
 
                 let _ = Box::pin(unlock_asset_request.process(app_config.clone())).await?;
 
