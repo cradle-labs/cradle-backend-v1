@@ -1,9 +1,12 @@
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
-use diesel::{Identifiable, Insertable, Queryable, QueryableByName, Selectable};
+use diesel::prelude::*;
+use diesel::{ExpressionMethods, Identifiable, Insertable, PgConnection, Queryable, QueryableByName, RunQueryDsl, Selectable};
+use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use anyhow::Result;
 
 #[derive(Serialize,Deserialize, Clone, Debug, QueryableByName, Queryable, Identifiable)]
 #[diesel(table_name = crate::schema::lendingpool)]
@@ -24,6 +27,18 @@ pub struct LendingPoolRecord {
     pub description: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime
+}
+
+impl LendingPoolRecord {
+    pub fn get(conn: &mut PooledConnection<ConnectionManager<PgConnection>>, value_id: Uuid)->Result<Self> {
+        use crate::schema::lendingpool::dsl::*;
+
+        let value = crate::schema::lendingpool::dsl::lendingpool.filter(
+            id.eq(value_id)
+        ).get_result::<Self>(conn)?;
+
+        Ok(value)
+    }
 }
 
 

@@ -6,6 +6,7 @@ use dialoguer::{Confirm, Select};
 use diesel::{PgConnection, ExpressionMethods, QueryDsl, RunQueryDsl};
 use diesel::r2d2::{ConnectionManager, Pool};
 use std::io::Write;
+use dotenvy::dotenv;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -139,24 +140,59 @@ fn duration_arg_to_offset(arg: &DurationArg) -> Duration {
 }
 
 fn main() -> Result<()> {
+    dotenv().ok();
+    // Force unbuffered stdout for immediate output
+    eprintln!("{}", "╔═══════════════════════════════════════════════════════╗".bright_cyan());
+    eprintln!("{}", "║     Cradle OHLC Time Series Aggregator Tool          ║".bright_cyan());
+    eprintln!("{}", "╚═══════════════════════════════════════════════════════╝".bright_cyan());
+    eprintln!();
+
     let args = CliArgs::parse();
 
     // Initialize database connection pool
+    eprint!("Connecting to database... ");
+    std::io::stderr().flush()?;
+
     let database_url = std::env::var("DATABASE_URL")
         .or_else(|_| std::env::var("DB_URL"))
-        .unwrap_or_else(|_| "postgres://localhost/cradle".to_string());
+        .unwrap_or_else(|_| {
+            eprintln!("{}", "⚠ DATABASE_URL not set, using default".yellow());
+            "postgres://localhost/cradle".to_string()
+        });
+
+    eprintln!("Using database: {}", database_url.dimmed());
+
+    match std::time::Instant::now().elapsed().as_secs() {
+        _ => {}
+    }
 
     let manager = ConnectionManager::<PgConnection>::new(&database_url);
-    let pool = Pool::builder()
+    let pool = match Pool::builder()
         .max_size(5)
-        .build(manager)?;
+        .build(manager)
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", format!("✗ Failed to create connection pool: {}", e).red());
+            eprintln!("{}", "Check that:".yellow());
+            eprintln!("  1. PostgreSQL server is running");
+            eprintln!("  2. DATABASE_URL is set correctly");
+            eprintln!("  3. Database user exists and has correct permissions");
+            return Err(e.into());
+        }
+    };
 
-    let mut conn = pool.get()?;
+    let mut conn = match pool.get() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{}", format!("✗ Failed to get database connection: {}", e).red());
+            eprintln!("{}", "The database server may not be responding.".yellow());
+            return Err(e.into());
+        }
+    };
 
-    println!("{}", "╔═══════════════════════════════════════════════════════╗".bright_cyan());
-    println!("{}", "║     Cradle OHLC Time Series Aggregator Tool          ║".bright_cyan());
-    println!("{}", "╚═══════════════════════════════════════════════════════╝".bright_cyan());
-    println!();
+    eprintln!("{}", "✓ Connected".green());
+    eprintln!();
 
     // Determine if we're in interactive or CLI mode
     let interactive = args.market.is_none() && args.asset.is_none();
@@ -167,8 +203,8 @@ fn main() -> Result<()> {
         run_cli_mode(&args, &mut conn)?;
     }
 
-    println!();
-    println!("{}", "✓ Operation completed successfully".green());
+    eprintln!();
+    eprintln!("{}", "✓ Operation completed successfully".green());
     Ok(())
 }
 

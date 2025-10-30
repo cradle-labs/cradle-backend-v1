@@ -4,19 +4,19 @@ use crate::market::db_types::{CreateMarket, MarketRecord, MarketRegulation, Mark
 
 
 
-#[derive(Deserialize,Serialize)]
+#[derive(Deserialize,Serialize, Debug)]
 pub struct UpdateMarketStatusInputArgs {
     pub market_id: Uuid,
     pub status: MarketStatus
 }
 
-#[derive(Deserialize,Serialize)]
+#[derive(Deserialize,Serialize, Debug)]
 pub struct UpdateMarketTypeInputArgs {
     pub market_id: Uuid,
     pub market_type: MarketType
 }
 
-#[derive(Deserialize,Serialize)]
+#[derive(Deserialize,Serialize, Debug)]
 pub struct UpdateMarketRegulationInputArgs {
     pub market_id: Uuid,
     pub regulation: MarketRegulation
@@ -29,7 +29,7 @@ pub struct GetMarketsFilter {
     pub regulation: Option<MarketRegulation>
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum MarketProcessorInput {
     CreateMarket(CreateMarket),
     UpdateMarketStatus(UpdateMarketStatusInputArgs),
@@ -40,7 +40,7 @@ pub enum MarketProcessorInput {
 }
 
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum MarketProcessorOutput {
     CreateMarket(Uuid),
     UpdateMarketStatus,

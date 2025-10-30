@@ -3,6 +3,7 @@ name = "cradle-back-end"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90.0"
+default-run = "cradle-back-end"
 
 [dependencies]
 anyhow = "1.0.100"

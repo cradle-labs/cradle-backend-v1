@@ -45,7 +45,7 @@ pub enum DataProviderType {
     Aggregated
 }
 
-#[derive(Deserialize, Serialize, Queryable, Identifiable, Selectable)]
+#[derive(Deserialize, Serialize, Queryable, Identifiable, Selectable, Debug)]
 #[diesel(table_name =  MarketsTimeSeriesTable)]
 pub struct MarketTimeSeriesRecord {
     pub id: Uuid,
@@ -65,7 +65,7 @@ pub struct MarketTimeSeriesRecord {
 }
 
 
-#[derive(Deserialize, Serialize,Insertable)]
+#[derive(Deserialize, Serialize,Insertable, Debug)]
 #[diesel(table_name = MarketsTimeSeriesTable)]
 pub struct CreateMarketTimeSeriesRecord {
     pub market_id: Uuid,

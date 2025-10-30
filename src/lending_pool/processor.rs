@@ -42,10 +42,14 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 let res = query.first::<LendingPoolRecord>(app_conn)?;
                 Ok(LendingPoolFunctionsOutput::GetLendingPool(res))
             }
-            LendingPoolFunctionsInput::CreateSnapShot(pool_id) => {
+            LendingPoolFunctionsInput::CreateSnapShot(pool_id_value) => {
+
+                let pool = LendingPoolRecord::get(app_conn, pool_id_value.clone())?;
+
+
                 let res = app_config.wallet.execute(
                     ContractCallInput::AssetLendingPool(
-                        AssetLendingPoolFunctionsInput::GetPoolStats
+                        AssetLendingPoolFunctionsInput::GetPoolStats(pool.pool_contract_id) // TODO: pool id
                     )
                 ).await?;
 
@@ -56,7 +60,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                         borrow_apy: BigDecimal::from(data.borrow_rate.clone()),
                         supply_apy: BigDecimal::from(data.supply_rate.clone()),
                         available_liquidity: BigDecimal::from(data.liquidity.clone()),
-                        lending_pool_id: pool_id.clone(),
+                        lending_pool_id: pool_id_value.clone(),
                         total_borrow: BigDecimal::from(data.total_borrowed.clone()),
                         total_supply: BigDecimal::from(data.total_supplied.clone()),
                         utilization_rate: BigDecimal::from(data.utilization.clone())
@@ -80,6 +84,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 Ok(LendingPoolFunctionsOutput::GetSnapShot(res))
             }
             LendingPoolFunctionsInput::SupplyLiquidity(args)=> {
+                let pool = LendingPoolRecord::get(app_conn, args.pool)?;
                 use crate::schema::cradlewalletaccounts;
                 let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts.filter(
                     cradlewalletaccounts::dsl::id.eq(args.wallet)
@@ -91,6 +96,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                             DepositArgs {
                                 amount: args.amount.clone(),
                                 user: wallet.address.clone(),
+                                contract_id: pool.pool_contract_id
                             }
                         )
                     )
@@ -121,6 +127,8 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 Err(anyhow!("Failed to supply liquidity"))
             }
             LendingPoolFunctionsInput::WithdrawLiquidity(args)=> {
+                let pool = LendingPoolRecord::get(app_conn, args.pool)?;
+
                 use crate::schema::cradlewalletaccounts::dsl as cwa_dsl;
 
                 let wallet = cradlewalletaccounts.filter(
@@ -132,7 +140,8 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                         AssetLendingPoolFunctionsInput::Withdraw(
                             WithdrawArgs {
                                 yield_token_amount: args.amount.clone(),
-                                user: wallet.address.clone()
+                                user: wallet.address.clone(),
+                                contract_id: pool.pool_contract_id
                             }
                         )
                     )
@@ -161,6 +170,8 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
             }
             LendingPoolFunctionsInput::BorrowAsset(args)=>{
 
+                let pool = LendingPoolRecord::get(app_conn, args.pool)?;
+
                 use crate::schema::cradlewalletaccounts::dsl as cwa_dsl;
                 use crate::schema::asset_book::dsl::*;
 
@@ -179,6 +190,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                                 collateral_asset: collateral_record.token.clone(),
                                 collateral_amount: args.amount.clone(),
                                 user: wallet.address.clone(),
+                                contract_id: pool.pool_contract_id.to_string()
                             }
                         )
                     )
@@ -220,9 +232,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     loans_dsl::id.eq(args.loan)
                 ).get_result::<crate::lending_pool::db_types::LoanRecord>(app_conn)?;
 
-                let pool = crate::schema::lendingpool::table.filter(
-                    pool_dsl::id.eq(loan.pool)
-                ).get_result::<LendingPoolRecord>(app_conn)?;
+                let pool = LendingPoolRecord::get(app_conn, loan.pool)?;
 
                 let collateral_record = asset_book.filter(
                     crate::schema::asset_book::dsl::id.eq(loan.pool)
@@ -235,6 +245,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                                 user: wallet.address.clone(),
                                 collateralized_asset: collateral_record.token.clone(),
                                 repay_amount: args.amount,
+                                contract_id: pool.pool_contract_id
                             }
                         )
                     )
@@ -274,9 +285,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     cwa_dsl::id.eq(loan.wallet_id)
                 ).get_result::<CradleWalletAccountRecord>(app_conn)?;
 
-                let pool = crate::schema::lendingpool::table.filter(
-                    pool_dsl::id.eq(loan.pool)
-                ).get_result::<LendingPoolRecord>(app_conn)?;
+                let pool = LendingPoolRecord::get(app_conn, loan.pool)?;
 
                 let collateral_record = asset_book.filter(
                     crate::schema::asset_book::dsl::id.eq(loan.pool)
@@ -290,6 +299,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                                 borrower: borrower_wallet.address.clone(),
                                 dept_to_cover: args.amount,
                                 collateral_asset: collateral_record.token.clone(),
+                                contract_id: pool.pool_contract_id
                             }
                         )
                     )

@@ -102,7 +102,7 @@ pub struct OrderBookTradeRecord {
 }
 
 
-#[derive(Deserialize,Serialize, Clone, Insertable)]
+#[derive(Deserialize,Serialize, Clone, Insertable, Debug)]
 #[diesel(table_name = OrderBookTrades)]
 pub struct CreateOrderBookTrade {
     pub maker_order_id: Uuid,

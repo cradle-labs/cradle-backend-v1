@@ -45,7 +45,7 @@ pub struct LiquidatePositionInputArgs {
     pub amount: u64
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum LendingPoolFunctionsInput {
     CreateLendingPool(CreateLendingPoolRecord),
     GetLendingPool(GetLendingPoolInput),
@@ -60,7 +60,7 @@ pub enum LendingPoolFunctionsInput {
     LiquidatePosition(LiquidatePositionInputArgs) 
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum LendingPoolFunctionsOutput {
     CreateLendingPool(Uuid),
     GetLendingPool(LendingPoolRecord),
