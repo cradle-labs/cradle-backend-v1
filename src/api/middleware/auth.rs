@@ -7,6 +7,7 @@ pub async fn validate_auth(
     headers: &HeaderMap,
     secret_key: &str,
 ) -> Result<(), ApiError> {
+    println!("headers coming in");
     let auth_header = headers
         .get("authorization")
         .and_then(|h| h.to_str().ok())
