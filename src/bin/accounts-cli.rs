@@ -1,21 +1,15 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use colored::Colorize;
 use std::io::Write;
+use diesel::RunQueryDsl;
 use uuid::Uuid;
 
 use cradle_back_end::accounts::db_types::{CradleAccountRecord, CradleAccountStatus, CradleAccountType, CreateCradleAccount};
-use cradle_back_end::accounts::processor_enums::{
-    AccountsProcessorInput, AccountsProcessorOutput, GetAccountInputArgs, UpdateAccountStatusInputArgs,
-    DeleteAccountInputArgs,
-};
-use cradle_back_end::cli_utils::{
-    menu::Operation,
-    input::Input,
-    formatting::{format_table, format_record, print_header, print_section},
-    print_success, print_info,
-};
+use cradle_back_end::accounts::processor_enums::{AccountsProcessorInput, AccountsProcessorOutput, GetAccountInputArgs, UpdateAccountStatusInputArgs, DeleteAccountInputArgs, GrantKYCInputArgs};
+use cradle_back_end::cli_utils::{menu::Operation, input::Input, formatting::{format_table, format_record, print_header, print_section}, print_success, print_info, print_error};
 use cradle_back_end::cli_helper::{initialize_app_config, call_action_router, execute_with_retry};
 use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
+use cradle_back_end::asset_book::db_types::AssetBookRecord;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -264,6 +258,46 @@ async fn delete_account(app_config: &cradle_back_end::utils::app_config::AppConf
     } else {
         print_info("Deletion cancelled");
     }
+
+    Ok(())
+}
+
+
+async fn associate_and_kyc(app_config: &cradle_back_end::utils::app_config::AppConfig)-> Result<()> {
+    
+    let account_id = Input::get_uuid("Enter account id")?;
+    
+    let request = ActionRouterInput::Accounts(
+        AccountsProcessorInput::HandleAssociateAssets(account_id.clone())
+    );
+    
+    match request.process(app_config.clone()).await {
+        Ok(_)=>{
+            let request = ActionRouterInput::Accounts(
+                AccountsProcessorInput::HandleKYCAssets(account_id.clone())
+            );
+            print_success("association complete");
+            let _ = request.process(app_config.clone()).await?;
+            print_success("kyc granted");
+            print_info("Done processing token associations and kyc ")
+        },
+        Err(e)=>{
+            print_error(&format!("Failed {}", e));
+            return Err(anyhow!(e))
+        }
+    }
+    
+    
+    Ok(())
+}
+
+
+async fn airdrop_tokens(app_config: &cradle_back_end::utils::app_config::AppConfig)-> Result<()> {
+
+    let mut conn = app_config.pool.get()?;
+    let tokens = cradle_back_end::schema::asset_book::dsl::asset_book.get_results::<AssetBookRecord>(&mut conn)?;
+
+    // let selection_list = tokens.iter().map(|v| v.name).collect();
 
     Ok(())
 }
