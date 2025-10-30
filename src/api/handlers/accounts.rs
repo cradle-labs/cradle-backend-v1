@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -74,12 +75,33 @@ pub async fn get_account_by_linked_id(
 
 /// GET /accounts/{account_id}/wallets - Get wallets for account (not implemented)
 pub async fn get_account_wallets(
-    State(_app_config): State<AppConfig>,
+    State(app_config): State<AppConfig>,
     Path(_account_id): Path<String>,
 ) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
-    Err(ApiError::internal_error(
-        "GET /accounts/{account_id}/wallets endpoint not yet implemented",
-    ))
+    let action = ActionRouterInput::Accounts(
+        AccountsProcessorInput::GetWallet(
+            GetWalletInputArgs::ByCradleAccount(_account_id.parse().map_err(|_|ApiError::internal_error("Unable to convert account id"))?)
+        )
+    );
+
+    let result = action
+        .process(app_config)
+        .await
+        .map_err(|_| ApiError::not_found("Account"))?;
+
+    match result {
+        ActionRouterOutput::Accounts(output) => {
+            match output {
+                AccountsProcessorOutput::GetWallet(account) => {
+                    let json = serde_json::to_value(&account)
+                        .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+                    Ok((StatusCode::OK, Json(ApiResponse::success(json))))
+                }
+                _ => Err(ApiError::internal_error("Unexpected response type")),
+            }
+        }
+        _ => Err(ApiError::internal_error("Unexpected response type")),
+    }
 }
 
 /// GET /wallets/{id} - Get wallet by UUID
