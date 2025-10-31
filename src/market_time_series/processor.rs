@@ -36,11 +36,9 @@ impl ActionProcessor<MarketTimeSeriesConfig, MarketTimeSeriesProcessorOutput> fo
 
                 let bars = markets_time_series.filter(
                         market_id.eq(args.market_id.clone()).and(
-                            asset.eq(args.asset.clone()).and(
                                 interval.eq(args.interval.clone()).and(
                                     start_time.ge(start)
                                 )
-                            )
                         )
                 ).get_results::<MarketTimeSeriesRecord>(app_conn)?;
 

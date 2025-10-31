@@ -20,7 +20,6 @@ use crate::{
 #[derive(Debug, Deserialize)]
 pub struct TimeSeriesParams {
     pub market: String,
-    pub asset: String,
     pub duration_secs: String,
     pub interval: String,
 }
@@ -34,10 +33,6 @@ pub async fn get_time_series_history(
     let market_id = uuid::Uuid::parse_str(&params.market)
         .map_err(|_| ApiError::bad_request("Invalid market UUID format"))?;
 
-    // Parse asset UUID
-    let asset_id = uuid::Uuid::parse_str(&params.asset)
-        .map_err(|_| ApiError::bad_request("Invalid asset UUID format"))?;
-
     // Parse duration in seconds
     let duration_secs = BigDecimal::from_str(&params.duration_secs)
         .map_err(|_| ApiError::bad_request("Invalid duration_secs format. Must be a number"))?;
@@ -49,7 +44,6 @@ pub async fn get_time_series_history(
         MarketTimeSeriesProcessorInput::GetHistory(
             crate::market_time_series::processor_enum::GetHistoryInputArgs {
                 market_id,
-                asset: asset_id,
                 duration_secs,
                 interval,
             },
