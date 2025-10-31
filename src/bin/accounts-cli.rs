@@ -143,9 +143,9 @@ async fn create_account(app_config: &cradle_back_end::utils::app_config::AppConf
     let statuses = vec!["UnVerified", "Verified"];
     let selected_status = Input::select_from_list("Initial status", statuses)?;
     let status = match selected_status {
-        0 => CradleAccountStatus::UnVerified,
+        0 => CradleAccountStatus::Unverified,
         1 => CradleAccountStatus::Verified,
-        _ => CradleAccountStatus::UnVerified,
+        _ => CradleAccountStatus::Unverified,
     };
 
     execute_with_retry(
@@ -185,11 +185,11 @@ async fn update_account(app_config: &cradle_back_end::utils::app_config::AppConf
     let statuses = vec!["UnVerified", "Verified", "Suspended", "Closed"];
     let selected_status = Input::select_from_list("New status", statuses)?;
     let new_status = match selected_status {
-        0 => CradleAccountStatus::UnVerified,
+        0 => CradleAccountStatus::Unverified,
         1 => CradleAccountStatus::Verified,
         2 => CradleAccountStatus::Suspended,
         3 => CradleAccountStatus::Closed,
-        _ => CradleAccountStatus::UnVerified,
+        _ => CradleAccountStatus::Unverified,
     };
 
     execute_with_retry(
