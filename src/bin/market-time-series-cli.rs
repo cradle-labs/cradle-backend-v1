@@ -51,7 +51,8 @@ async fn main() -> Result<()> {
                 Operation::Cancel => {
                     eprintln!("{}", "Goodbye!".bright_cyan());
                     break;
-                }
+                },
+                _=>unimplemented!()
             },
             Err(e) => {
                 eprintln!("{}", format!("Error: {}", e).red());

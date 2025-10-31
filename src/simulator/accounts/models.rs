@@ -34,6 +34,9 @@ pub struct GeneratedAccount {
     /// Assets for which KYC was granted
     pub kyc_assets: Vec<Uuid>,
 
+    /// Assets that were airdropped to this account
+    pub airdropped_assets: Vec<Uuid>,
+
     /// When the account was created
     pub created_at: DateTime<Utc>,
 
@@ -42,6 +45,9 @@ pub struct GeneratedAccount {
 
     /// When KYC was completed (if applicable)
     pub kyc_completed_at: Option<DateTime<Utc>>,
+
+    /// When airdrops were completed (if applicable)
+    pub airdrop_completed_at: Option<DateTime<Utc>>,
 }
 
 impl GeneratedAccount {
@@ -64,9 +70,11 @@ impl GeneratedAccount {
             status,
             associated_assets: Vec::new(),
             kyc_assets: Vec::new(),
+            airdropped_assets: Vec::new(),
             created_at: Utc::now(),
             association_completed_at: None,
             kyc_completed_at: None,
+            airdrop_completed_at: None,
         }
     }
 
@@ -82,6 +90,14 @@ impl GeneratedAccount {
         self.kyc_assets = assets.clone();
         if !assets.is_empty() {
             self.kyc_completed_at = Some(Utc::now());
+        }
+        self
+    }
+
+    pub fn with_airdropped_assets(mut self, assets: Vec<Uuid>) -> Self {
+        self.airdropped_assets = assets.clone();
+        if !assets.is_empty() {
+            self.airdrop_completed_at = Some(Utc::now());
         }
         self
     }
@@ -110,6 +126,12 @@ pub struct BatchStats {
 
     /// Successful KYC grants
     pub successful_kyc_grants: u32,
+
+    /// Total airdrops attempted
+    pub total_airdrops: u32,
+
+    /// Successful airdrops
+    pub successful_airdrops: u32,
 }
 
 impl BatchStats {
@@ -136,6 +158,13 @@ impl BatchStats {
             return 100.0; // No KYC attempted
         }
         (self.successful_kyc_grants as f64 / self.total_kyc_grants as f64) * 100.0
+    }
+
+    pub fn success_rate_airdrops(&self) -> f64 {
+        if self.total_airdrops == 0 {
+            return 100.0; // No airdrops attempted
+        }
+        (self.successful_airdrops as f64 / self.total_airdrops as f64) * 100.0
     }
 }
 

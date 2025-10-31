@@ -144,7 +144,7 @@ fn parse_args(args: &[String]) -> Result<GeneratorConfig> {
                     return Err(anyhow!("Missing value for --initial-status"));
                 }
                 config.initial_status = match args[i].to_lowercase().as_str() {
-                    "unverified" => CradleAccountStatus::UnVerified,
+                    "unverified" => CradleAccountStatus::Unverified,
                     "verified" => CradleAccountStatus::Verified,
                     "suspended" => CradleAccountStatus::Suspended,
                     "closed" => CradleAccountStatus::Closed,

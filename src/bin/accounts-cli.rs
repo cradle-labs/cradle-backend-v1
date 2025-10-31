@@ -1,10 +1,15 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use std::io::Write;
+use bigdecimal::ToPrimitive;
+use contract_integrator::utils::functions::asset_manager::{AirdropArgs, AssetManagerFunctionInput, AssetManagerFunctionOutput};
+use contract_integrator::utils::functions::commons::ContractFunctionProcessor;
+use contract_integrator::utils::functions::{ContractCallInput, ContractCallOutput};
 use diesel::RunQueryDsl;
+use diesel::prelude::*;
 use uuid::Uuid;
 
-use cradle_back_end::accounts::db_types::{CradleAccountRecord, CradleAccountStatus, CradleAccountType, CreateCradleAccount};
+use cradle_back_end::accounts::db_types::{CradleAccountRecord, CradleAccountStatus, CradleAccountType, CradleWalletAccountRecord, CreateCradleAccount};
 use cradle_back_end::accounts::processor_enums::{AccountsProcessorInput, AccountsProcessorOutput, GetAccountInputArgs, UpdateAccountStatusInputArgs, DeleteAccountInputArgs, GrantKYCInputArgs};
 use cradle_back_end::cli_utils::{menu::Operation, input::Input, formatting::{format_table, format_record, print_header, print_section}, print_success, print_info, print_error};
 use cradle_back_end::cli_helper::{initialize_app_config, call_action_router, execute_with_retry};
@@ -45,6 +50,7 @@ async fn main() -> Result<()> {
                 Operation::Create => create_account(&app_config).await?,
                 Operation::Update => update_account(&app_config).await?,
                 Operation::Delete => delete_account(&app_config).await?,
+                Operation::Other => do_other(&app_config).await?,
                 Operation::Cancel => {
                     eprintln!("{}", "Goodbye!".bright_cyan());
                     break;
@@ -263,6 +269,19 @@ async fn delete_account(app_config: &cradle_back_end::utils::app_config::AppConf
 }
 
 
+async fn do_other(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+
+    let action = Input::select_from_list("Choose an Action", vec!["Associate", "Airdrop", "Setup All"])?;
+
+    match action {
+        0=>associate_and_kyc(app_config).await,
+        1=>airdrop_tokens(app_config).await,
+        2=>setup_all_accounts(app_config).await,
+        _=>unimplemented!()
+    }
+
+}
+
 async fn associate_and_kyc(app_config: &cradle_back_end::utils::app_config::AppConfig)-> Result<()> {
     
     let account_id = Input::get_uuid("Enter account id")?;
@@ -292,12 +311,381 @@ async fn associate_and_kyc(app_config: &cradle_back_end::utils::app_config::AppC
 }
 
 
-async fn airdrop_tokens(app_config: &cradle_back_end::utils::app_config::AppConfig)-> Result<()> {
+async fn setup_all_accounts(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+    print_header("Setup All Accounts");
 
+    // Fetch all wallet accounts from database
     let mut conn = app_config.pool.get()?;
-    let tokens = cradle_back_end::schema::asset_book::dsl::asset_book.get_results::<AssetBookRecord>(&mut conn)?;
+    let wallets = cradle_back_end::schema::cradlewalletaccounts::dsl::cradlewalletaccounts
+        .get_results::<CradleWalletAccountRecord>(&mut conn)
+        .map_err(|e| anyhow!("Failed to fetch wallet accounts: {}", e))?;
 
-    // let selection_list = tokens.iter().map(|v| v.name).collect();
+    if wallets.is_empty() {
+        print_info("No wallet accounts found in the database");
+        return Ok(());
+    }
+
+    eprintln!();
+    print_info(&format!("Found {} wallet accounts to process", wallets.len()));
+
+    // Ask for confirmation
+    let confirmed = cradle_back_end::cli_utils::confirm(
+        "Continue with setup for all accounts? This may take a while."
+    )?;
+
+    if !confirmed {
+        print_info("Operation cancelled");
+        return Ok(());
+    }
+
+    eprintln!();
+
+    // Statistics tracking
+    let mut stats = SetupStats::new(wallets.len());
+
+    // Process each account
+    for (index, wallet) in wallets.iter().enumerate() {
+        let account_num = index + 1;
+        let total = wallets.len();
+
+        eprintln!("[{}/{}] Processing account {}... ", account_num, total, wallet.id);
+        std::io::stderr().flush().ok();
+
+        // Step 1: Associate Assets
+        eprint!("  └─ Associating assets... ");
+        std::io::Write::flush(&mut std::io::stderr()).ok();
+
+        match associate_account_with_retry(wallet.id, app_config).await {
+            Ok(_) => {
+                eprintln!("{}", "✓".green());
+                stats.successful_associations += 1;
+            }
+            Err(e) => {
+                eprintln!("{} {}", "✗".red(), e);
+                stats.failed_associations += 1;
+
+                // Ask user what to do
+                match handle_step_failure("association").await {
+                    StepAction::Skip => {
+                        print_info(&format!("  Skipped account {}", wallet.id));
+                        stats.skipped_accounts += 1;
+                        continue;
+                    }
+                    StepAction::Exit => {
+                        print_error("Setup aborted by user");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Step 2: Grant KYC
+        eprint!("     └─ Granting KYC... ");
+        std::io::Write::flush(&mut std::io::stderr()).ok();
+
+        match grant_kyc_account_with_retry(wallet.id, app_config).await {
+            Ok(_) => {
+                eprintln!("{}", "✓".green());
+                stats.successful_kyc += 1;
+            }
+            Err(e) => {
+                eprintln!("{} {}", "✗".red(), e);
+                stats.failed_kyc += 1;
+
+                match handle_step_failure("KYC grant").await {
+                    StepAction::Skip => {
+                        print_info(&format!("  Skipped account {}", wallet.id));
+                        stats.skipped_accounts += 1;
+                        continue;
+                    }
+                    StepAction::Exit => {
+                        print_error("Setup aborted by user");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Step 3: Airdrop Tokens
+        eprint!("        └─ Airdropping tokens... ");
+        std::io::Write::flush(&mut std::io::stderr()).ok();
+
+        match airdrop_account_with_retry(wallet.id, app_config).await {
+            Ok(count) => {
+                eprintln!("{}", "✓".green());
+                stats.successful_airdrops += count;
+            }
+            Err(e) => {
+                eprintln!("{} {}", "✗".red(), e);
+                stats.failed_airdrops += 1;
+
+                match handle_step_failure("airdrop").await {
+                    StepAction::Skip => {
+                        print_info(&format!("  Skipped account {}", wallet.id));
+                        stats.skipped_accounts += 1;
+                        continue;
+                    }
+                    StepAction::Exit => {
+                        print_error("Setup aborted by user");
+                        break;
+                    }
+                }
+            }
+        }
+
+        stats.completed_accounts += 1;
+        eprintln!("     {} Account setup complete", "✓".green());
+        eprintln!();
+    }
+
+    // Print summary
+    print_setup_summary(&stats);
+
+    Ok(())
+}
+
+/// Helper enum for step-level user actions
+#[derive(Debug, Clone, Copy)]
+enum StepAction {
+    Skip,
+    Exit,
+}
+
+/// Statistics for setup_all_accounts
+struct SetupStats {
+    total_accounts: usize,
+    completed_accounts: usize,
+    skipped_accounts: usize,
+    successful_associations: usize,
+    failed_associations: usize,
+    successful_kyc: usize,
+    failed_kyc: usize,
+    successful_airdrops: u32,
+    failed_airdrops: usize,
+}
+
+impl SetupStats {
+    fn new(total: usize) -> Self {
+        Self {
+            total_accounts: total,
+            completed_accounts: 0,
+            skipped_accounts: 0,
+            successful_associations: 0,
+            failed_associations: 0,
+            successful_kyc: 0,
+            failed_kyc: 0,
+            successful_airdrops: 0,
+            failed_airdrops: 0,
+        }
+    }
+
+    fn success_rate_associations(&self) -> f64 {
+        let total = self.successful_associations + self.failed_associations;
+        if total == 0 {
+            return 100.0;
+        }
+        (self.successful_associations as f64 / total as f64) * 100.0
+    }
+
+    fn success_rate_kyc(&self) -> f64 {
+        let total = self.successful_kyc + self.failed_kyc;
+        if total == 0 {
+            return 100.0;
+        }
+        (self.successful_kyc as f64 / total as f64) * 100.0
+    }
+}
+
+/// Handle failure at each step - ask user to skip or exit
+async fn handle_step_failure(step_name: &str) -> StepAction {
+    let options = vec!["Skip This Account", "Exit Setup"];
+    match Input::select_from_list(&format!("{} failed. What next?", step_name), options) {
+        Ok(choice) => {
+            match choice {
+                0 => StepAction::Skip,
+                _ => StepAction::Exit,
+            }
+        }
+        Err(_) => StepAction::Exit, // Default to exit on error
+    }
+}
+
+/// Associate assets for a single account with retry logic
+async fn associate_account_with_retry(
+    account_id: Uuid,
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
+    let request = ActionRouterInput::Accounts(
+        AccountsProcessorInput::HandleAssociateAssets(account_id)
+    );
+
+    match request.process(app_config.clone()).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(anyhow!("Association failed: {}", e)),
+    }
+}
+
+/// Grant KYC for a single account with retry logic
+async fn grant_kyc_account_with_retry(
+    account_id: Uuid,
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
+    let request = ActionRouterInput::Accounts(
+        AccountsProcessorInput::HandleKYCAssets(account_id)
+    );
+
+    match request.process(app_config.clone()).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(anyhow!("KYC grant failed: {}", e)),
+    }
+}
+
+/// Airdrop tokens for a single account
+async fn airdrop_account_with_retry(
+    account_id: Uuid,
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<u32> {
+    let mut conn = app_config.pool.get()?;
+
+    // Fetch wallet
+    let wallet = cradle_back_end::schema::cradlewalletaccounts::dsl::cradlewalletaccounts
+        .find(account_id)
+        .get_result::<CradleWalletAccountRecord>(&mut conn)
+        .map_err(|e| anyhow!("Failed to fetch wallet: {}", e))?;
+
+    // Fetch all assets
+    let assets = cradle_back_end::schema::asset_book::dsl::asset_book
+        .get_results::<AssetBookRecord>(&mut conn)
+        .map_err(|e| anyhow!("Failed to fetch assets: {}", e))?;
+
+    if assets.is_empty() {
+        return Ok(0); // No assets to airdrop
+    }
+
+    let mut successful_airdrops = 0;
+
+    // Airdrop each asset
+    for asset in assets {
+        let airdrop_input = ContractCallInput::AssetManager(
+            AssetManagerFunctionInput::Airdrop(
+                AirdropArgs {
+                    amount: 1_000_000, // 1 million tokens
+                    asset_contract: asset.asset_manager,
+                    target: wallet.address.clone(),
+                }
+            )
+        );
+
+        let mut wallet_clone = app_config.wallet.clone();
+        match airdrop_input.process(&mut wallet_clone).await {
+            Ok(_) => {
+                successful_airdrops += 1;
+            }
+            Err(_e) => {
+                // Log but continue with other assets
+            }
+        }
+    }
+
+    Ok(successful_airdrops)
+}
+
+/// Print setup summary
+fn print_setup_summary(stats: &SetupStats) {
+    eprintln!();
+    eprintln!("{}", "╔═══════════════════════════════════════════════════════╗".bright_cyan());
+    eprintln!("{}", "║  Account Setup Complete                               ║".bright_cyan());
+    eprintln!("{}", "╚═══════════════════════════════════════════════════════╝".bright_cyan());
+    eprintln!();
+
+    eprintln!("  {} Account Processing", "├─".bright_cyan());
+    eprintln!("  │  ├─ Total Accounts: {}", stats.total_accounts);
+    eprintln!(
+        "  │  ├─ Completed: {} {}",
+        stats.completed_accounts,
+        if stats.completed_accounts == stats.total_accounts {
+            "✓".green().to_string()
+        } else {
+            format!("(⚠ {} incomplete)", stats.total_accounts - stats.completed_accounts).yellow().to_string()
+        }
+    );
+    if stats.skipped_accounts > 0 {
+        eprintln!("  │  └─ Skipped: {} {}", stats.skipped_accounts, "⚠".yellow());
+    }
+
+    eprintln!("  {} Asset Associations", "├─".bright_cyan());
+    eprintln!("  │  ├─ Successful: {}", stats.successful_associations);
+    eprintln!(
+        "  │  └─ Failed: {} {}",
+        stats.failed_associations,
+        format!("({:.1}% success)", stats.success_rate_associations()).bright_green()
+    );
+
+    eprintln!("  {} KYC Grants", "├─".bright_cyan());
+    eprintln!("  │  ├─ Successful: {}", stats.successful_kyc);
+    eprintln!(
+        "  │  └─ Failed: {} {}",
+        stats.failed_kyc,
+        format!("({:.1}% success)", stats.success_rate_kyc()).bright_green()
+    );
+
+    eprintln!("  {} Token Airdrops", "└─".bright_cyan());
+    eprintln!("  │  ├─ Successful: {}", stats.successful_airdrops);
+    eprintln!("  │  └─ Failed: {}", stats.failed_airdrops);
+
+    eprintln!();
+}
+
+async fn airdrop_tokens(app_config: &cradle_back_end::utils::app_config::AppConfig)-> Result<()> {
+    let mut runs = 0;
+    loop {
+
+        if runs > 0 {
+            let confirm = Input::get_bool("Continue")?;
+
+            if(!confirm) { break; };
+        }
+
+
+        let mut conn = app_config.pool.get()?;
+        let tokens = cradle_back_end::schema::asset_book::dsl::asset_book.get_results::<AssetBookRecord>(&mut conn)?;
+
+        let selection_list: Vec<&str> = tokens.iter().map(|v| v.name.as_str()).collect();
+
+        let wallet_id = Input::get_uuid("Provide wallet ID")?;
+
+        let wallet =  cradle_back_end::schema::cradlewalletaccounts::dsl::cradlewalletaccounts.find(wallet_id).get_result::<CradleWalletAccountRecord>(&mut conn)?;
+
+        let selection = Input::select_from_list("Select an asset to handle", selection_list)?;
+
+        let selected = tokens[selection].clone();
+
+        let amount = Input::get_decimal("Amount to airdrop")?;
+
+
+        let request = ContractCallInput::AssetManager(
+            AssetManagerFunctionInput::Airdrop(
+                AirdropArgs{
+                    amount: amount.to_u64().unwrap(),
+                    asset_contract: selected.asset_manager,
+                    target: wallet.address
+                }
+            )
+        );
+        let mut wallet = app_config.wallet.clone();
+
+        let res = request.process(&mut wallet).await?;
+
+        if let ContractCallOutput::AssetManager(AssetManagerFunctionOutput::Airdrop(output)) = res {
+
+            println!("Transaction {:?}", output.transaction_id);
+
+            print_success("Completed airdrop");
+        }
+
+        runs +=1;
+    }
+
 
     Ok(())
 }

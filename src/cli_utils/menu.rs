@@ -55,13 +55,14 @@ pub enum Operation {
     Update,
     Delete,
     Cancel,
+    Other
 }
 
 impl Operation {
     /// Show operation selection menu
     pub fn select() -> CliResult<Self> {
         let menu = Menu::new("Select operation")
-            .items(vec!["List", "View", "Create", "Update", "Delete", "Cancel"]);
+            .items(vec!["List", "View", "Create", "Update", "Delete", "Cancel", "Other"]);
 
         match menu.interact()? {
             0 => Ok(Operation::List),
@@ -70,6 +71,7 @@ impl Operation {
             3 => Ok(Operation::Update),
             4 => Ok(Operation::Delete),
             5 => Ok(Operation::Cancel),
+            6 => Ok(Operation::Other),
             _ => Ok(Operation::Cancel),
         }
     }

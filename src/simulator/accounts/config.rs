@@ -18,6 +18,12 @@ pub struct GeneratorConfig {
     /// Whether to grant KYC for associated assets
     pub apply_kyc: bool,
 
+    /// Whether to airdrop tokens to generated accounts
+    pub apply_airdrops: bool,
+
+    /// Amount of each asset to airdrop per account
+    pub airdrop_amount: u64,
+
     /// Output file path for generated accounts
     pub output_file: PathBuf,
 
@@ -38,8 +44,10 @@ impl Default for GeneratorConfig {
             account_type: CradleAccountType::Retail,
             assets_to_associate: Vec::new(),
             apply_kyc: false,
+            apply_airdrops: false,
+            airdrop_amount: 1_000_000,
             output_file: PathBuf::from("simulated_accounts.json"),
-            initial_status: CradleAccountStatus::UnVerified,
+            initial_status: CradleAccountStatus::Unverified,
             retry_limit: 3,
             retry_delay_ms: 500,
         }
@@ -73,6 +81,18 @@ impl GeneratorConfig {
     /// Enable KYC granting
     pub fn with_apply_kyc(mut self, apply: bool) -> Self {
         self.apply_kyc = apply;
+        self
+    }
+
+    /// Enable token airdrops
+    pub fn with_apply_airdrops(mut self, apply: bool) -> Self {
+        self.apply_airdrops = apply;
+        self
+    }
+
+    /// Set airdrop amount per asset per account
+    pub fn with_airdrop_amount(mut self, amount: u64) -> Self {
+        self.airdrop_amount = amount;
         self
     }
 

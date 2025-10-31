@@ -40,7 +40,9 @@ impl ExponentialBackoffRetry {
             match operation().await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
+                    println!("Error :: {}",e);
                     last_error = Some(e);
+
 
                     if attempt < self.max_retries {
                         let delay_ms = self.calculate_delay(attempt);

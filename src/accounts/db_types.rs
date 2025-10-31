@@ -30,7 +30,8 @@ pub enum CradleWalletStatus {
 #[ExistingTypePath="crate::schema::sql_types::Cradleaccountstatus"]
 #[serde(rename_all = "lowercase")]
 pub enum CradleAccountStatus {
-    UnVerified,
+    #[serde(rename="unverified")]
+    Unverified,
     Verified,
     Suspended,
     Closed

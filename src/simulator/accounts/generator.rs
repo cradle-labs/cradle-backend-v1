@@ -3,6 +3,8 @@ use chrono::Utc;
 use uuid::Uuid;
 use colored::Colorize;
 use std::fmt::Write as FmtWrite;
+use diesel::RunQueryDsl;
+use diesel::prelude::*;
 
 use crate::utils::app_config::AppConfig;
 use crate::accounts::db_types::CreateCradleAccount;
@@ -12,6 +14,10 @@ use crate::accounts::processor_enums::{
 use crate::action_router::ActionRouterInput;
 use crate::cli_helper::call_action_router;
 use crate::simulator::shared::ExponentialBackoffRetry;
+use contract_integrator::utils::functions::asset_manager::{AirdropArgs, AssetManagerFunctionInput};
+use contract_integrator::utils::functions::commons::ContractFunctionProcessor;
+use contract_integrator::utils::functions::ContractCallInput;
+use crate::asset_book::db_types::AssetBookRecord;
 
 use super::config::GeneratorConfig;
 use super::models::{GeneratedAccount, GeneratedBatch};
@@ -28,7 +34,7 @@ impl AccountGenerator {
         Self { config, app_config }
     }
 
-    /// Generate a batch of accounts with automatic asset association and KYC
+    /// Generate a batch of accounts with automatic asset association, KYC, and airdrops
     pub async fn generate_batch(&self) -> Result<GeneratedBatch> {
         let mut batch = GeneratedBatch::new(self.config.clone());
         batch.stats.total_requested = self.config.batch_size;
@@ -39,6 +45,11 @@ impl AccountGenerator {
 
             if self.config.apply_kyc {
                 batch.stats.total_kyc_grants =
+                    self.config.batch_size * self.config.assets_to_associate.len() as u32;
+            }
+
+            if self.config.apply_airdrops {
+                batch.stats.total_airdrops =
                     self.config.batch_size * self.config.assets_to_associate.len() as u32;
             }
         }
@@ -124,6 +135,24 @@ impl AccountGenerator {
                                                 self.config.assets_to_associate.clone();
                                             batch.stats.successful_kyc_grants +=
                                                 self.config.assets_to_associate.len() as u32;
+
+                                            // Airdrop tokens if configured
+                                            if self.config.apply_airdrops {
+                                                eprint!("        └─ Airdropping tokens... ");
+                                                std::io::Write::flush(&mut std::io::stderr()).ok();
+
+                                                match self.airdrop_tokens_with_retry(account_output.id).await {
+                                                    Ok(count) => {
+                                                        eprintln!("{}", "✓".green());
+                                                        generated_account.airdropped_assets =
+                                                            self.config.assets_to_associate.clone();
+                                                        batch.stats.successful_airdrops += count;
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("{} {}", "✗".red(), e);
+                                                    }
+                                                }
+                                            }
                                         }
                                         Err(e) => {
                                             eprintln!("{} {}", "✗".red(), e);
@@ -256,6 +285,69 @@ impl AccountGenerator {
             .await
     }
 
+    /// Airdrop tokens with retry logic - returns number of successful airdrops
+    async fn airdrop_tokens_with_retry(&self, account_id: Uuid) -> Result<u32> {
+        let mut retry = ExponentialBackoffRetry::new(
+            self.config.retry_delay_ms,
+            self.config.retry_limit,
+        );
+
+        let app_config = self.app_config.clone();
+        let airdrop_amount = self.config.airdrop_amount;
+        let assets = self.config.assets_to_associate.clone();
+
+        retry
+            .execute(|| async {
+                self.execute_airdrops(&app_config, account_id, airdrop_amount, assets.clone()).await
+            })
+            .await
+    }
+
+    /// Execute airdrops for all associated assets
+    async fn execute_airdrops(&self, app_config: &AppConfig, account_id: Uuid, amount: u64, assets: Vec<Uuid>) -> Result<u32> {
+        // Fetch wallet information from database
+        let mut conn = app_config.pool.get()?;
+
+        let wallet = crate::schema::cradlewalletaccounts::dsl::cradlewalletaccounts
+            .find(account_id)
+            .get_result::<crate::accounts::db_types::CradleWalletAccountRecord>(&mut conn)
+            .map_err(|e| anyhow!("Failed to fetch wallet: {}", e))?;
+
+        let mut successful_airdrops = 0;
+
+        // Airdrop each asset
+        for asset_id in assets {
+            // Fetch asset details
+            let asset = crate::schema::asset_book::dsl::asset_book
+                .find(asset_id)
+                .get_result::<AssetBookRecord>(&mut conn)
+                .map_err(|e| anyhow!("Failed to fetch asset {}: {}", asset_id, e))?;
+
+            // Execute airdrop
+            let airdrop_input = ContractCallInput::AssetManager(
+                AssetManagerFunctionInput::Airdrop(
+                    AirdropArgs {
+                        amount,
+                        asset_contract: asset.asset_manager,
+                        target: wallet.address.clone(),
+                    }
+                )
+            );
+
+            let mut wallet_clone = app_config.wallet.clone();
+            match airdrop_input.process(&mut wallet_clone).await {
+                Ok(_) => {
+                    successful_airdrops += 1;
+                }
+                Err(e) => {
+                    eprintln!("  Warning: Airdrop failed for asset {}: {}", asset_id, e);
+                }
+            }
+        }
+
+        Ok(successful_airdrops)
+    }
+
     /// Print a formatted summary of the batch results
     fn print_batch_summary(&self, batch: &GeneratedBatch) {
         let mut summary = String::new();
@@ -339,6 +431,24 @@ impl AccountGenerator {
                 "  │  └─ Successful: {} {}",
                 batch.stats.successful_kyc_grants,
                 format!("({:.1}%)", batch.stats.success_rate_kyc())
+                    .bright_green()
+            )
+            .ok();
+        }
+
+        if batch.stats.total_airdrops > 0 {
+            writeln!(summary, "  {} Token Airdrops", "├─".bright_cyan()).ok();
+            writeln!(
+                summary,
+                "  │  ├─ Attempted: {}",
+                batch.stats.total_airdrops
+            )
+            .ok();
+            writeln!(
+                summary,
+                "  │  └─ Successful: {} {}",
+                batch.stats.successful_airdrops,
+                format!("({:.1}%)", batch.stats.success_rate_airdrops())
                     .bright_green()
             )
             .ok();
