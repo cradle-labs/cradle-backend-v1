@@ -113,21 +113,25 @@ mod tests {
     #[tokio::test]
     async fn test_operation_with_retries() -> Result<()> {
         let mut retry = ExponentialBackoffRetry::new(10, 3);
-        let mut attempt_count = 0;
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let attempt_count_clone = attempt_count.clone();
 
         let result = retry
-            .execute(|| async {
-                attempt_count += 1;
-                if attempt_count < 3 {
-                    Err(anyhow!("Temporary failure"))
-                } else {
-                    Ok::<i32, anyhow::Error>(42)
+            .execute(|| {
+                let count = attempt_count_clone.clone();
+                async move {
+                    let current = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if current < 2 {
+                        Err(anyhow!("Temporary failure"))
+                    } else {
+                        Ok::<i32, anyhow::Error>(42)
+                    }
                 }
             })
             .await?;
 
         assert_eq!(result, 42);
-        assert_eq!(attempt_count, 3);
+        assert_eq!(attempt_count.load(std::sync::atomic::Ordering::SeqCst), 3);
         Ok(())
     }
 

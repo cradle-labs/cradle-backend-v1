@@ -15,7 +15,7 @@ use crate::schema::markets_time_series as MarketTimeSeriesTable;
 impl ActionProcessor<MarketTimeSeriesConfig, MarketTimeSeriesProcessorOutput> for MarketTimeSeriesProcessorInput {
     async fn process(&self, app_config: &mut AppConfig, local_config: &mut MarketTimeSeriesConfig, conn: Option<&mut PooledConnection<ConnectionManager<PgConnection>>>) -> anyhow::Result<MarketTimeSeriesProcessorOutput> {
         let app_conn = conn.ok_or_else(||anyhow!("Failed to get conn"))?;
-        let io_conn = app_config.get_io()?;
+        // let io_conn = app_config.get_io()?;
 
         match self {
             MarketTimeSeriesProcessorInput::AddRecord(args) => {
@@ -23,7 +23,7 @@ impl ActionProcessor<MarketTimeSeriesConfig, MarketTimeSeriesProcessorOutput> fo
 
                 let bar_id = diesel::insert_into(MarketTimeSeriesTable::table).values(args).returning(id).get_result::<Uuid>(app_conn)?;
 
-                io_conn.to(format!("market_timeseries_{}", args.market_id)).emit("price-change", args).await.map_err(|e|anyhow!("Unable to broadcast to room {}", e))?;
+                // io_conn.to(format!("market_timeseries_{}", args.market_id)).emit("price-change", args).await.map_err(|e|anyhow!("Unable to broadcast to room {}", e))?;
 
 
                 Ok(MarketTimeSeriesProcessorOutput::AddRecord(bar_id))

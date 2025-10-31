@@ -10,26 +10,37 @@ use crate::schema::markets_time_series as MarketsTimeSeriesTable;
 #[ExistingTypePath="crate::schema::sql_types::TimeSeriesInterval"]
 pub enum TimeSeriesInterval {
     #[serde(rename = "15secs")]
+    #[db_rename = "15secs"]
     FifteenSecs,
     #[serde(rename = "30secs")]
+    #[db_rename = "30secs"]
     ThirtySecs,
     #[serde(rename = "45secs")]
+    #[db_rename = "45secs"]
     FortyFiveSecs,
     #[serde(rename = "1min")]
+    #[db_rename = "1min"]
     OneMinute,
     #[serde(rename = "5min")]
+    #[db_rename = "5min"]
     FiveMinutes,
     #[serde(rename = "15min")]
+    #[db_rename = "15min"]
     FifteenMinutes,
     #[serde(rename = "30min")]
+    #[db_rename = "30min"]
     ThirtyMinutes,
     #[serde(rename = "1hr")]
+    #[db_rename = "1hr"]
     OneHour,
     #[serde(rename = "4hr")]
+    #[db_rename = "4hr"]
     FourHours,
     #[serde(rename = "1day")]
+    #[db_rename = "1day"]
     OneDay,
     #[serde(rename = "1week")]
+    #[db_rename = "1week"]
     OneWeek
 }
 

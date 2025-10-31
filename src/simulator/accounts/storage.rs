@@ -58,24 +58,28 @@ pub fn append_to_existing_batch(new_batch: &GeneratedBatch, path: &Path) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_save_and_load_batch() -> Result<()> {
-        let temp_file = NamedTempFile::new()?;
-        let path = temp_file.path();
+        use std::path::Path;
+
+        let temp_file = "./test_batch.json";
+        let temp_path = Path::new(temp_file);
+        let _ = std::fs::remove_file(temp_path); // Clean up from previous test
 
         let config = crate::simulator::accounts::GeneratorConfig::new();
         let mut batch = GeneratedBatch::new(config);
         batch.stats.total_requested = 5;
         batch.stats.successfully_created = 5;
 
-        save_batch_to_json(&batch, path)?;
+        save_batch_to_json(&batch, temp_path)?;
 
-        let loaded_batch = load_batch_from_json(path)?;
+        let loaded_batch = load_batch_from_json(temp_path)?;
         assert_eq!(loaded_batch.stats.total_requested, 5);
         assert_eq!(loaded_batch.stats.successfully_created, 5);
 
+        // Cleanup
+        let _ = std::fs::remove_file(temp_path);
         Ok(())
     }
 }

@@ -127,8 +127,8 @@ async fn create_market(app_config: &cradle_back_end::utils::app_config::AppConfi
     let selected_regulation = Input::select_from_list("Regulation", regulations)?;
     let regulation = match selected_regulation {
         0 => MarketRegulation::Regulated,
-        1 => MarketRegulation::UnRegulated,
-        _ => MarketRegulation::UnRegulated,
+        1 => MarketRegulation::Unregulated,
+        _ => MarketRegulation::Unregulated,
     };
 
     execute_with_retry(
