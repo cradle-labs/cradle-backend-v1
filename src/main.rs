@@ -96,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/accounts/:account_id/wallets", get(get_account_wallets))
         .route("/wallets/:id", get(get_wallet_by_id))
         .route("/wallets/account/:account_id", get(get_wallet_by_account_id))
+        .route("/balances/:account_id", get(api_get_account_balances))
 
         // Assets endpoints
         .route("/assets/:id", get(get_asset_by_id))
