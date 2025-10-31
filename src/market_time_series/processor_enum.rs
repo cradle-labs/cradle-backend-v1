@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::market_time_series::db_types::{CreateMarketTimeSeriesRecord, MarketTimeSeriesRecord, TimeSeriesInterval};
 
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize, Debug)]
 pub struct GetHistoryInputArgs {
     pub market_id: Uuid,
     pub asset: Uuid,
@@ -13,13 +13,13 @@ pub struct GetHistoryInputArgs {
     pub interval: TimeSeriesInterval
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum MarketTimeSeriesProcessorInput {
     AddRecord(CreateMarketTimeSeriesRecord),
     GetHistory(GetHistoryInputArgs)
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum MarketTimeSeriesProcessorOutput {
     AddRecord(Uuid),
     GetHistory(Vec<MarketTimeSeriesRecord>)

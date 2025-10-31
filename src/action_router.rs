@@ -14,7 +14,7 @@ use crate::order_book::processor_enums::{OrderBookProcessorInput, OrderBookProce
 use crate::utils::db::get_conn;
 use crate::utils::traits::ActionProcessor;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum ActionRouterInput {
     Accounts(AccountsProcessorInput),
     AssetBook(AssetBookProcessorInput),
@@ -24,7 +24,7 @@ pub enum ActionRouterInput {
     Pool(LendingPoolFunctionsInput)
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug )]
 pub enum ActionRouterOutput {
     Accounts(AccountsProcessorOutput),
     AssetBook(AssetBookProcessorOutput),

@@ -1,2 +1,4 @@
 /target
 .env
+simulator_state
+simulated_accounts.json

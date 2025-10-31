@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use contract_integrator::utils::functions::asset_issuer::{AssetIssuerFunctionsInput, AssetIssuerFunctionsOutput, CreateAssetArgs};
 use contract_integrator::utils::functions::{ContractCallInput, ContractCallOutput};
+use contract_integrator::utils::functions::commons::get_contract_id_from_evm_address;
 use diesel::prelude::*;
 use diesel::{PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
@@ -27,7 +28,7 @@ impl ActionProcessor<AssetBookConfig, AssetBookProcessorOutput> for AssetBookPro
                                 symbol: args.symbol.clone(),
                                 name: args.name.clone(),
                                 acl_contract: contract_ids.access_controller_contract_id.to_solidity_address()?,
-                                allow_list: 1
+                                allow_list:2
                             })
                         );
 
@@ -74,8 +75,10 @@ impl ActionProcessor<AssetBookConfig, AssetBookProcessorOutput> for AssetBookPro
                     }
                 };
 
+                let asset_manager_contract_id = get_contract_id_from_evm_address(&result.asset_manager).await?;
+
                 let input = CreateAssetOnBook {
-                    asset_manager: result.asset_manager,
+                    asset_manager: asset_manager_contract_id.to_string(),
                     token: result.token,
                     name: args.name.clone(),
                     symbol: args.symbol.clone(),

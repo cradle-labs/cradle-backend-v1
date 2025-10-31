@@ -11,10 +11,13 @@ use crate::schema::orderbooktrades as OrderBookTrades;
 #[ExistingTypePath = "crate::schema::sql_types::FillMode"]
 pub enum FillMode {
     #[serde(rename = "fill-or-kill")]
+    #[db_rename = "fill-or-kill"]
     FillOrKill,
     #[serde(rename = "immediate-or-cancel")]
+    #[db_rename = "immediate-or-cancel"]
     ImmediateOrCancel,
     #[serde(rename = "good-till-cancel")]
+    #[db_rename = "good-till-cancel"]
     GoodTillCancel
 }
 
@@ -102,7 +105,7 @@ pub struct OrderBookTradeRecord {
 }
 
 
-#[derive(Deserialize,Serialize, Clone, Insertable)]
+#[derive(Deserialize,Serialize, Clone, Insertable, Debug)]
 #[diesel(table_name = OrderBookTrades)]
 pub struct CreateOrderBookTrade {
     pub maker_order_id: Uuid,

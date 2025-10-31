@@ -414,6 +414,7 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                         .left_join(
                             accountassetbook::table.on(
                                 accountassetbook::dsl::asset_id.eq(asset_book::dsl::id)
+                                    .and(accountassetbook::dsl::associated.eq(true))
                                     .and(accountassetbook::dsl::account_id.eq(wallet_id.clone()))
                             )
                         )
@@ -478,6 +479,7 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                         .left_join(
                             accountassetbook::table.on(
                                 accountassetbook::dsl::asset_id.eq(asset_book::dsl::id)
+                                    .and(accountassetbook::dsl::kyced.eq(true))
                                     .and(accountassetbook::dsl::account_id.eq(wallet_id.clone()))
                             )
                         )

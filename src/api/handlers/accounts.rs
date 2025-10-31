@@ -4,7 +4,10 @@ use axum::{
     http::StatusCode,
     Json,
 };
-
+use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive};
+use contract_integrator::utils::functions::commons::get_account_balances;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use crate::{
     accounts::processor_enums::{AccountsProcessorInput, AccountsProcessorOutput, GetAccountInputArgs, GetWalletInputArgs},
     action_router::{ActionRouterInput, ActionRouterOutput},
@@ -166,4 +169,39 @@ pub async fn get_wallet_by_account_id(
         }
         _ => Err(ApiError::internal_error("Unexpected response type")),
     }
+}
+
+pub async fn api_get_account_balances(
+    State(app_state): State<AppConfig>,
+    Path(wallet_id): Path<String>
+) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
+
+    #[derive(Serialize, Deserialize)]
+    struct Balance {
+        pub token: String,
+        pub balance: BigDecimal
+    }
+
+    let mut  all_balances: Vec<Balance > = vec![];
+
+    let data = get_account_balances(&app_state.wallet.client, wallet_id.as_str()).await.map_err(|_|ApiError::internal_error("Failed to fetch balances "))?;
+
+    let v = data.hbars.get_value().to_i64().unwrap_or(0);
+
+    all_balances.push(Balance {
+        token: "HBAR".to_string(),
+        balance: BigDecimal::from(v)
+    });
+
+    for (token, balance) in data.tokens {
+        all_balances.push(Balance {
+            token: token.to_string(),
+            balance: BigDecimal::from(balance)
+        })
+    }
+
+
+
+    let data_value = serde_json::to_value(&all_balances).unwrap_or(serde_json::to_value::<Vec<Balance>>(Vec::new()).map_err(|_|ApiError::internal_error("Unable to get data"))?);
+    Ok((StatusCode::OK, Json(ApiResponse::success(json!(data_value)))))
 }

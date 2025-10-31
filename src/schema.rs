@@ -121,6 +121,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    kvstore (key) {
+        key -> Text,
+        value -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     lendingpool (id) {
         id -> Uuid,
         pool_address -> Text,
@@ -321,6 +328,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     asset_book,
     cradleaccounts,
     cradlewalletaccounts,
+    kvstore,
     lendingpool,
     lendingpoolsnapshots,
     loanliquidations,

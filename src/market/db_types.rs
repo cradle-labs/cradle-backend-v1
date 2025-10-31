@@ -28,7 +28,7 @@ pub enum MarketType {
 #[serde(rename_all = "lowercase")]
 pub enum MarketRegulation {
     Regulated,
-    UnRegulated
+    Unregulated
 }
 
 #[derive(Serialize,Deserialize, Debug, Clone, Queryable, Identifiable)]

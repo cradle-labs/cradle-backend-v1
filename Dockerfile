@@ -5,6 +5,7 @@ WORKDIR /app
 
 FROM chef as planner
 COPY . .
+RUN cargo update -p contract-integrator
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef as builder
