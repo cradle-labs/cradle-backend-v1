@@ -120,6 +120,25 @@ async fn main() -> anyhow::Result<()> {
         .route("/pools/name/:name", get(get_pool_by_name))
         .route("/pools/address/:address", get(get_pool_by_address))
         .route("/pools/:id/snapshot", get(get_pool_snapshot))
+        .route("/pools", get(get_pools))
+        .route("/pools/:id/pool-stats", get(get_pool_stats))
+        .route("/pools/:id/interest-rates", get(get_interest_rates))
+        .route("/pools/:id/collateral-info", get(get_collateral_info))
+        .route("/pools/:pool_id/user-positions/:wallet_id", get(get_user_positions))
+
+        // Loan endpoints
+        .route("/loans", get(get_all_loans))
+        .route("/loans/pool/:id", get(get_loans_by_pool))
+        .route("/loans/wallet/:id", get(get_loans_by_wallet))
+        .route("/loans/status/:status", get(get_loans_by_status))
+
+        // Loan repayment endpoints
+        .route("/loan-repayments", get(get_all_repayments))
+        .route("/loan-repayments/loan/:id", get(get_repayments_by_loan))
+
+        // Loan liquidation endpoints
+        .route("/loan-liquidations", get(get_all_liquidations))
+        .route("/loan-liquidations/loan/:id", get(get_liquidations_by_loan))
 
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())

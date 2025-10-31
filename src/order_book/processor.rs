@@ -14,7 +14,7 @@ use crate::accounts::db_types::CradleWalletAccountRecord;
 use crate::action_router::ActionRouterInput;
 use crate::asset_book::db_types::AssetBookRecord;
 use crate::order_book::config::OrderBookConfig;
-use crate::order_book::db_types::{FillMode, OrderBookRecord};
+use crate::order_book::db_types::{FillMode, OrderBookRecord, OrderStatus};
 use crate::order_book::processor_enums::{OrderBookProcessorInput, OrderBookProcessorOutput, OrderFillResult, OrderFillStatus};
 use crate::order_book::sql_queries::{get_matching_orders, get_order_fill_trades};
 use crate::utils::app_config::AppConfig;
@@ -233,24 +233,35 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 } else {
                     crate::order_book::db_types::OrderStatus::Open
                 };
-                let _ = diesel::update(orderbook::table.filter(orderbook::id.eq(order_id.clone())))
-                    .set((
-                        orderbook::filled_bid_amount.eq(new_filled_bid.clone()),
-                        orderbook::filled_ask_amount.eq(new_filled_ask.clone()),
-                        orderbook::status.eq(new_status)
-                    ))
-                    .execute(app_conn)?;
 
-                let newly_filled_bid = order.bid_amount.clone() - remaining_bid.clone();
-                let new_filled_bid = &order.filled_bid_amount + &newly_filled_bid;
-
+                match new_status {
+                    OrderStatus::Closed=>{
+                        let _ = diesel::update(orderbook::table.filter(orderbook::id.eq(order_id.clone())))
+                            .set((
+                                orderbook::filled_bid_amount.eq(new_filled_bid.clone()),
+                                orderbook::filled_ask_amount.eq(new_filled_ask.clone()),
+                                orderbook::status.eq(new_status),
+                                orderbook::filled_at.eq(Utc::now().naive_utc())
+                            ))
+                            .execute(app_conn)?;
+                    },
+                    _=>{
+                        let _ = diesel::update(orderbook::table.filter(orderbook::id.eq(order_id.clone())))
+                            .set((
+                                orderbook::filled_bid_amount.eq(new_filled_bid.clone()),
+                                orderbook::filled_ask_amount.eq(new_filled_ask.clone()),
+                                orderbook::status.eq(new_status)
+                            ))
+                            .execute(app_conn)?;
+                    }
+                }
 
 
                 let unlock_asset_request = ActionRouterInput::OrderBook(
                     OrderBookProcessorInput::UnLockWalletAssets(
                         order.wallet.clone(),
                         order.bid_asset.clone(),
-                        new_filled_bid
+                        new_filled_bid.clone()
                     )
                 );
 

@@ -3,10 +3,14 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use diesel::RunQueryDsl;
 use serde::Deserialize;
 
 use crate::{
-    market::processor_enums::{MarketProcessorInput, MarketProcessorOutput},
+    market::{
+        processor_enums::{MarketProcessorInput, MarketProcessorOutput},
+        db_types::MarketRecord,
+    },
     action_router::{ActionRouterInput, ActionRouterOutput},
     api::{error::ApiError, response::ApiResponse},
     utils::app_config::AppConfig,
@@ -51,37 +55,22 @@ pub async fn get_market_by_id(
     }
 }
 
-/// GET /markets - Get markets with optional filters
+/// GET /markets - Get all markets
 pub async fn get_markets(
     State(app_config): State<AppConfig>,
-    Query(params): Query<MarketFilterParams>,
+    Query(_params): Query<MarketFilterParams>,
 ) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
-    // For now, return all markets without filtering
-    // Full filtering implementation would require parsing enum values
-    let action = ActionRouterInput::Markets(MarketProcessorInput::GetMarkets(
-        crate::market::processor_enums::GetMarketsFilter {
-            status: None,
-            market_type: None,
-            regulation: None,
-        },
-    ));
+    let mut conn = app_config
+        .pool
+        .get()
+        .map_err(|_| ApiError::internal_error("Failed to acquire database connection"))?;
 
-    let result = action
-        .process(app_config)
-        .await
-        .map_err(|e| ApiError::database_error(format!("Failed to fetch markets: {}", e)))?;
+    let results = crate::schema::markets::dsl::markets
+        .get_results::<MarketRecord>(&mut conn)
+        .map_err(|e| ApiError::internal_error(format!("Database error: {}", e)))?;
 
-    match result {
-        ActionRouterOutput::Markets(output) => {
-            match output {
-                MarketProcessorOutput::GetMarkets(markets) => {
-                    let json = serde_json::to_value(&markets)
-                        .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
-                    Ok((StatusCode::OK, Json(ApiResponse::success(json))))
-                }
-                _ => Err(ApiError::internal_error("Unexpected response type")),
-            }
-        }
-        _ => Err(ApiError::internal_error("Unexpected response type")),
-    }
+    let json = serde_json::to_value(&results)
+        .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+    Ok((StatusCode::OK, Json(ApiResponse::success(json))))
 }

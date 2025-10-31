@@ -55,7 +55,9 @@ WHERE
         io.order_type = 'market'
         OR
         -- If incoming order is LIMIT, enforce price compatibility
-        (io.order_type = 'limit' AND io.price * ob.price >= 1)
+        -- Incoming order asks for ob.ask_asset and offers ob.bid_asset
+        -- For proper matching: incoming price must satisfy the maker's price
+        (io.order_type = 'limit' AND io.price >= ob.price)
     )
 
     AND NOT EXISTS (
@@ -102,20 +104,33 @@ pub fn get_order_fill_trades(
             break;
         }
 
-        let can_fill_ask = unfilled_ask.clone().min(matching_order.remaining_bid_amount.clone());
-        let can_fill_bid = can_fill_ask * &ratio;
+        // The incoming order offers bid_amount to get ask_amount
+        // The matching order (maker) offers ask_amount to get bid_amount
+        // So: incoming.bid_amount should match maker.ask_amount
+        //     incoming.ask_amount should match maker.bid_amount
 
-        let actual_fill_bid = can_fill_bid.min(matching_order.remaining_ask_amount.clone());
-        let actual_fill_ask = &actual_fill_bid / &ratio;
+        // Determine how much of the incoming ask_amount can be filled
+        // Limited by: 1) what's remaining in incoming ask, 2) what maker can provide (remaining_ask_amount)
+        let taker_fill_ask = unfilled_ask.clone().min(matching_order.remaining_ask_amount.clone());
 
-        unfilled_ask -= &actual_fill_ask;
-        remaining_bid -= &actual_fill_bid;
+        // Calculate corresponding bid amount using the incoming order's price ratio
+        let taker_fill_bid = &taker_fill_ask * &ratio;
+
+        // Limit by what the maker can actually buy (their remaining_bid_amount)
+        let maker_can_provide_bid = matching_order.remaining_bid_amount.clone();
+        let actual_taker_fill_bid = taker_fill_bid.min(maker_can_provide_bid);
+
+        // Recalculate ask amount based on actual bid fill
+        let actual_taker_fill_ask = &actual_taker_fill_bid / &ratio;
+
+        unfilled_ask -= &actual_taker_fill_ask;
+        remaining_bid -= &actual_taker_fill_bid;
 
         trades.push(CreateOrderBookTrade {
             maker_order_id: matching_order.id.clone(),
             taker_order_id: incoming.id.clone(),
-            maker_filled_amount: actual_fill_bid,
-            taker_filled_amount: actual_fill_ask
+            maker_filled_amount: actual_taker_fill_bid,
+            taker_filled_amount: actual_taker_fill_ask
         });
     }
 
