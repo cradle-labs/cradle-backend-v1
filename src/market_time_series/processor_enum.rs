@@ -9,7 +9,8 @@ use crate::market_time_series::db_types::{CreateMarketTimeSeriesRecord, MarketTi
 pub struct GetHistoryInputArgs {
     pub market_id: Uuid,
     pub duration_secs: BigDecimal,
-    pub interval: TimeSeriesInterval
+    pub interval: TimeSeriesInterval,
+    pub asset_id: Uuid
 }
 
 #[derive(Deserialize, Serialize, Debug)]

@@ -6,7 +6,7 @@ use axum::{
 use bigdecimal::BigDecimal;
 use serde::Deserialize;
 use std::str::FromStr;
-
+use uuid::Uuid;
 use crate::{
     market_time_series::processor_enum::{
         MarketTimeSeriesProcessorInput, MarketTimeSeriesProcessorOutput,
@@ -22,6 +22,7 @@ pub struct TimeSeriesParams {
     pub market: String,
     pub duration_secs: String,
     pub interval: String,
+    pub asset_id: String
 }
 
 /// GET /time-series/history - Get time series data with filters
@@ -40,12 +41,15 @@ pub async fn get_time_series_history(
     // Parse interval
     let interval = parse_time_series_interval(&params.interval)?;
 
+    let asset_id = Uuid::parse_str(params.asset_id.as_str()).map_err(|_| ApiError::internal_error("failed to parse asset_id"))?;
+
     let action = ActionRouterInput::MarketTimeSeries(
         MarketTimeSeriesProcessorInput::GetHistory(
             crate::market_time_series::processor_enum::GetHistoryInputArgs {
                 market_id,
                 duration_secs,
                 interval,
+                asset_id
             },
         ),
     );
@@ -84,6 +88,9 @@ fn parse_time_series_interval(
         "4hr" => Ok(TimeSeriesInterval::FourHours),
         "1day" => Ok(TimeSeriesInterval::OneDay),
         "1week" => Ok(TimeSeriesInterval::OneWeek),
+        "15secs"=>Ok(TimeSeriesInterval::FifteenMinutes),
+        "30secs"=>Ok(TimeSeriesInterval::ThirtySecs),
+        "45secs"=>Ok(TimeSeriesInterval::FortyFiveSecs),
         _ => Err(ApiError::bad_request(
             "Invalid interval. Expected: 1min, 5min, 15min, 30min, 1hr, 4hr, 1day, or 1week",
         )),

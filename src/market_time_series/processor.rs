@@ -38,6 +38,8 @@ impl ActionProcessor<MarketTimeSeriesConfig, MarketTimeSeriesProcessorOutput> fo
                         market_id.eq(args.market_id.clone()).and(
                                 interval.eq(args.interval.clone()).and(
                                     start_time.ge(start)
+                                ).and( 
+                                    asset.eq(args.asset_id) 
                                 )
                         )
                 ).get_results::<MarketTimeSeriesRecord>(app_conn)?;
