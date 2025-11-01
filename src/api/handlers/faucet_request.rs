@@ -7,11 +7,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    accounts::db_types::CradleWalletAccountRecord, 
-    api::{error::ApiError, response::ApiResponse}, 
-    asset_book::db_types::{AssetBookRecord, AssetType}, 
-    schema::orderbook::wallet, 
-    utils::app_config::AppConfig};
+    accounts::db_types::CradleWalletAccountRecord, action_router::ActionRouterInput, api::{error::ApiError, response::ApiResponse}, asset_book::db_types::{AssetBookRecord, AssetType}, schema::orderbook::wallet, utils::app_config::AppConfig};
 
 
 #[derive(Deserialize , Serialize )]
@@ -35,7 +31,7 @@ pub async fn airdrop_request(
         cradlewalletaccounts.filter(
             cradle_account_id.eq(fields.account.clone())
         ).get_result::<CradleWalletAccountRecord>(&mut conn)
-    };
+    }.unwrap();
 
 
     let token_data = {
@@ -44,15 +40,30 @@ pub async fn airdrop_request(
         asset_book.filter(
             id.eq(fields.asset)
         ).get_result::<AssetBookRecord>(&mut conn)
-    };
+    }.unwrap();
+
+    let req = ActionRouterInput::Accounts(
+        crate::accounts::processor_enums::AccountsProcessorInput::HandleAssociateAssets(wallet_data.id.clone())
+    );
+
+    req.process(app_config.clone()).await.unwrap();
+
+    let req = ActionRouterInput::Accounts(
+        crate::accounts::processor_enums::AccountsProcessorInput::HandleKYCAssets(wallet_data.id.clone())
+    );
+
+    req.process(app_config.clone()).await.unwrap();
+
 
     let airdrop_request = ContractCallInput::AssetManager(
         AssetManagerFunctionInput::Airdrop(AirdropArgs {
             amount: 1_000_000_0000_0000, // A mullion of the asset
-            asset_contract: token_data.unwrap().asset_manager,
-            target: wallet_data.unwrap().address
+            asset_contract: token_data.asset_manager.clone(),
+            target: wallet_data.address.clone()
         })
     );
+    
+
 
 
     match airdrop_request.process(&mut action_wallet).await {

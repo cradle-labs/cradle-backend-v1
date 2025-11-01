@@ -98,7 +98,18 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                             };
 
                             let wallet_id = diesel::insert_into(CradleWalletAccounts::table).values(&action_data).returning(id).get_result::<Uuid>(action_conn)?;
+                            
 
+                            let associate_req = ActionRouterInput::Accounts(
+                                AccountsProcessorInput::HandleAssociateAssets(wallet_id)
+                            );
+
+                            let kyc_req = ActionRouterInput::Accounts(
+                                AccountsProcessorInput::HandleKYCAssets(wallet_id)
+                            );
+
+                            let _ = Box::pin(associate_req.process(app_config.clone())).await?;
+                            let _ = Box::pin(kyc_req.process(app_config.clone())).await?;
 
                             return Ok(AccountsProcessorOutput::CreateAccountWallet(CreateAccountWalletOutputArgs {
                                 id: wallet_id
@@ -110,6 +121,8 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                         return Err(anyhow!("Failed to  create account with factory contract"));
                     }
                 }
+
+                
 
                 Err(anyhow!("Unable to get connection"))
             }
