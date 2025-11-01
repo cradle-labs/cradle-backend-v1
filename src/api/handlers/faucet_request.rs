@@ -42,17 +42,33 @@ pub async fn airdrop_request(
         ).get_result::<AssetBookRecord>(&mut conn)
     }.unwrap();
 
-    let req = ActionRouterInput::Accounts(
-        crate::accounts::processor_enums::AccountsProcessorInput::HandleAssociateAssets(wallet_data.id.clone())
-    );
+    let res = {
+        let associate_req = ActionRouterInput::Accounts(
+            crate::accounts::processor_enums::AccountsProcessorInput::HandleAssociateAssets(wallet_data.id.clone())
+        );
+    
+        match associate_req.process(app_config.clone()).await {
+            Ok(_)=>{
+                
+            },
+            Err(e)=>{
+                println!("Failed to associate :: {}", e)
+            }
+        }
+    
+        let kyc_request = ActionRouterInput::Accounts(
+            crate::accounts::processor_enums::AccountsProcessorInput::HandleKYCAssets(wallet_data.id.clone())
+        );
+    
+        match kyc_request.process(app_config.clone()).await {
+            Ok(_)=>{
 
-    req.process(app_config.clone()).await.unwrap();
-
-    let req = ActionRouterInput::Accounts(
-        crate::accounts::processor_enums::AccountsProcessorInput::HandleKYCAssets(wallet_data.id.clone())
-    );
-
-    req.process(app_config.clone()).await.unwrap();
+            },
+            Err(e)=>{
+                println!("Failed to grant kyc to account :: {}", e)
+            }
+        }
+    };
 
 
     let airdrop_request = ContractCallInput::AssetManager(
