@@ -36,7 +36,7 @@ use api::{
     middleware::auth::validate_auth,
 };
 use utils::app_config::AppConfig;
-use crate::sockets::on_connect;
+use crate::{api::handlers::faucet_request::airdrop_request, sockets::on_connect};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -140,6 +140,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/loan-liquidations", get(get_all_liquidations))
         .route("/loan-liquidations/loan/:id", get(get_liquidations_by_loan))
 
+        // faucet request 
+        .route("/faucet", post(airdrop_request))
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())
         .layer(auth_layer)

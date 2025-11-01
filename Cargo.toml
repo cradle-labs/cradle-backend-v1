@@ -18,7 +18,7 @@ serde_json = {version = "1.0.145", features = ["preserve_order"]}
 tokio = { version =  "1.48.0", features = ["full"] }
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
 contract-integrator = { package = "contract-integrator", git="https://github.com/cradle-labs/cradle-contract-integrator-v1.git" }
-axum = "0.7"
+axum = {version = "0.7", features = ["macros"]}
 tower = "0.5"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing = "0.1"
@@ -29,5 +29,3 @@ dialoguer = { version = "0.11", features = ["password"] }
 colored = "2.1"
 rand = "0.8"
 
-[net]
-git-fetch-with-cli = true

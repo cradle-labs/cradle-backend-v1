@@ -6,3 +6,4 @@ pub mod orders;
 pub mod time_series;
 pub mod lending_pools;
 pub mod mutation;
+pub mod faucet_request;
