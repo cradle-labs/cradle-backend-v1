@@ -128,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Loan endpoints
         .route("/loans", get(get_all_loans))
+        .route("/loan/:loan_id", get(get_loan_by_id))
         .route("/loans/pool/:id", get(get_loans_by_pool))
         .route("/loans/wallet/:id", get(get_loans_by_wallet))
         .route("/loans/status/:status", get(get_loans_by_status))

@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
+use diesel::prelude::*;
 use serde_json::json;
 
 use crate::{
@@ -194,6 +194,29 @@ pub async fn get_loans_by_pool(
     let results = crate::schema::loans::dsl::loans
         .filter(crate::schema::loans::dsl::pool.eq(pool_uuid))
         .get_results::<LoanRecord>(&mut conn)
+        .map_err(|e| ApiError::internal_error(format!("Database error: {}", e)))?;
+
+    let json = serde_json::to_value(&results)
+        .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+    Ok((StatusCode::OK, Json(ApiResponse::success(json))))
+}
+
+pub async fn get_loan_by_id(
+    State(app_config): State<AppConfig>,
+    Path(loan_id): Path<String>
+) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
+    let loan_uuid = uuid::Uuid::parse_str(&loan_id)
+        .map_err(|_| ApiError::bad_request("Invalid pool ID format"))?;
+
+    let mut conn = app_config
+        .pool
+        .get()
+        .map_err(|_| ApiError::internal_error("Failed to acquire database connection"))?;
+
+    let results = crate::schema::loans::dsl::loans
+        .filter(crate::schema::loans::dsl::id.eq(&loan_uuid))
+        .get_result::<LoanRecord>(&mut conn)
         .map_err(|e| ApiError::internal_error(format!("Database error: {}", e)))?;
 
     let json = serde_json::to_value(&results)
