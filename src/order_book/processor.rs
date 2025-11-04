@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::{NaiveDateTime, Utc};
 use contract_integrator::utils::functions::{ContractCallInput, ContractCallOutput};
-use contract_integrator::utils::functions::cradle_account::{CradleAccountFunctionInput, CradleAccountFunctionOutput, LockAssetArgs, UnLockAssetArgs};
+use contract_integrator::utils::functions::cradle_account::{CradleAccountFunctionInput, CradleAccountFunctionOutput, LockAssetArgs, TransferAssetArgs, UnLockAssetArgs};
 use contract_integrator::utils::functions::orderbook_settler::{OrderBookSettlerFunctionInput, OrderBookSettlerFunctionOutput, SettleOrderInputArgs};
 use diesel::PgConnection;
 use diesel::prelude::*;
@@ -170,35 +170,80 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     println!("Maker asset {:?}", marker_asset.clone());
                     println!("Taker asset {:?}", taker_asset.clone());
 
-
-                    let res = app_config.wallet.execute(ContractCallInput::OrderBookSettler(
-                        OrderBookSettlerFunctionInput::SettleOrder(
-                            SettleOrderInputArgs {
-                                bid_asset: marker_asset.token,
-                                ask_asset: taker_asset.token,
-                                ask_asset_amount: trade.taker_filled_amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
-                                bid_asset_amount: trade.maker_filled_amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
-                                asker: taker_wallet.address,
-                                bidder: maket_wallet.address
+                    let bid_transfer = app_config.wallet.execute(ContractCallInput::CradleAccount(
+                        CradleAccountFunctionInput::TransferAsset(
+                            TransferAssetArgs {
+                                account_contract_id: maket_wallet.contract_id,
+                                amount: trade.maker_filled_amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
+                                asset: marker_asset.token,
+                                to: taker_wallet.address
                             }
                         )
                     )).await?;
 
-                    if let ContractCallOutput::OrderBookSettler(OrderBookSettlerFunctionOutput::SettleOrder(res)) = res {
-                        let _ = diesel::update(orderbooktrades::table.filter(
-                            orderbooktrades::id.eq(trade.id.clone())
-                        ))
-                        .set((
-                            orderbooktrades::settlement_status.eq(crate::order_book::db_types::SettlementStatus::Settled),
-                            orderbooktrades::settled_at.eq(Utc::now().naive_utc()),
-                            orderbooktrades::settlement_tx.eq(Some(res.transaction_id.clone()))
-                        ))
-                        .execute(app_conn)?;
 
-                        continue
-                    }else {
-                        return Err(anyhow!("Unexpected contract call output"));
+                    let ask_transfer = app_config.wallet.execute(ContractCallInput::CradleAccount(
+                        CradleAccountFunctionInput::TransferAsset(
+                            TransferAssetArgs {
+                                account_contract_id: taker_wallet.contract_id,
+                                amount: trade.taker_filled_amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
+                                asset: taker_asset.token,
+                                to: maket_wallet.address
+                            }
+                        )
+                    )).await?;
+
+                    if let ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::TransferAsset(bid_transfer_res)) = bid_transfer {
+                        if let ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::TransferAsset(ask_transfer_res)) = ask_transfer {
+                            let _ = diesel::update(orderbooktrades::table.filter(
+                            orderbooktrades::id.eq(trade.id.clone())
+                            ))
+                            .set((
+                                orderbooktrades::settlement_status.eq(crate::order_book::db_types::SettlementStatus::Settled),
+                                orderbooktrades::settled_at.eq(Utc::now().naive_utc()),
+                                orderbooktrades::settlement_tx.eq(Some(bid_transfer_res.transaction_id.clone()))
+                            ))
+                            .execute(app_conn)?;
+
+                            println!("Transaction id :: BID Tx {:?} ASK Tx {:?}", bid_transfer_res.transaction_id.clone(), ask_transfer_res.transaction_id.clone());
+
+                            continue
+                        }
                     }
+
+                    return Err(anyhow!("Unexpected contract call output"))
+
+
+                    // let res = app_config.wallet.execute(ContractCallInput::OrderBookSettler(
+                    //     OrderBookSettlerFunctionInput::SettleOrder(
+                    //         SettleOrderInputArgs {
+                    //             bid_asset: marker_asset.token,
+                    //             ask_asset: taker_asset.token,
+                    //             ask_asset_amount: trade.taker_filled_amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
+                    //             bid_asset_amount: trade.maker_filled_amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
+                    //             asker: taker_wallet.address,
+                    //             bidder: maket_wallet.address
+                    //         }
+                    //     )
+                    // )).await?;
+
+                    // if let ContractCallOutput::OrderBookSettler(OrderBookSettlerFunctionOutput::SettleOrder(res)) = res {
+                    //     let _ = diesel::update(orderbooktrades::table.filter(
+                    //         orderbooktrades::id.eq(trade.id.clone())
+                    //     ))
+                    //     .set((
+                    //         orderbooktrades::settlement_status.eq(crate::order_book::db_types::SettlementStatus::Settled),
+                    //         orderbooktrades::settled_at.eq(Utc::now().naive_utc()),
+                    //         orderbooktrades::settlement_tx.eq(Some(res.transaction_id.clone()))
+                    //     ))
+                    //     .execute(app_conn)?;
+
+                    //     println!("Transaction id :: {:?}", res.transaction_id.clone());
+
+                    //     continue
+                    // }else {
+                    //     return Err(anyhow!("Unexpected contract call output"));
+                    // }
                 }
 
                 // io_conn.to(format!("order_{}", order_id)).emit("settled", &json!({

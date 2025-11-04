@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use bigdecimal::BigDecimal;
+use chrono::Utc;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use uuid::Uuid;
@@ -17,9 +18,16 @@ pub fn discover_accounts(
     account_prefix: &str,
 ) -> Result<Vec<CradleAccountRecord>> {
     use crate::schema::cradleaccounts::dsl::*;
+    use chrono::NaiveDate;
+    
+    let cutoff_date = NaiveDate::from_ymd_opt(2025, 11, 3)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
 
     let accounts = cradleaccounts
         .filter(linked_account_id.like(format!("{}%", account_prefix)))
+        .filter(created_at.lt(cutoff_date))  // older than Nov 3rd, 2025
         .load::<CradleAccountRecord>(conn)?;
 
     Ok(accounts)

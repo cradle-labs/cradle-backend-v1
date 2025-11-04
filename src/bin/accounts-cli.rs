@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use chrono::NaiveDate;
 use colored::Colorize;
 use std::io::Write;
 use bigdecimal::ToPrimitive;
@@ -314,9 +315,17 @@ async fn associate_and_kyc(app_config: &cradle_back_end::utils::app_config::AppC
 async fn setup_all_accounts(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
     print_header("Setup All Accounts");
 
+    let cutoff_date = NaiveDate::from_ymd_opt(2025, 11, 3)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+
     // Fetch all wallet accounts from database
     let mut conn = app_config.pool.get()?;
     let wallets = cradle_back_end::schema::cradlewalletaccounts::dsl::cradlewalletaccounts
+    .filter(
+        cradle_back_end::schema::cradlewalletaccounts::dsl::created_at.gt(cutoff_date)
+    )
         .get_results::<CradleWalletAccountRecord>(&mut conn)
         .map_err(|e| anyhow!("Failed to fetch wallet accounts: {}", e))?;
 
