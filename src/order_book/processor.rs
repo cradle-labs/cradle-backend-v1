@@ -374,32 +374,29 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 }
             },
             OrderBookProcessorInput::UnLockWalletAssets(wallet_id, asset, amount) => {
-                let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts.filter(
-                    cradlewalletaccounts::dsl::id.eq(wallet_id.clone())
-                ).get_result::<CradleWalletAccountRecord>(app_conn)?;
+                let _ = async {
+                    let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts
+                        .filter(cradlewalletaccounts::dsl::id.eq(wallet_id.clone()))
+                        .get_result::<CradleWalletAccountRecord>(app_conn)?;
 
-                let asset_record = asset_book::dsl::asset_book.filter(
-                    asset_book::dsl::id.eq(asset.clone())
-                ).get_result::<AssetBookRecord>(app_conn)?;
+                    let asset_record = asset_book::dsl::asset_book
+                        .filter(asset_book::dsl::id.eq(asset.clone()))
+                        .get_result::<AssetBookRecord>(app_conn)?;
 
-                let res = app_config.wallet.execute(
-                    ContractCallInput::CradleAccount(
-                        CradleAccountFunctionInput::UnLockAsset(
-                            UnLockAssetArgs {
-                                asset: asset_record.token,
-                                amount: amount.to_u64().ok_or_else(||anyhow!("Amount too large to convert to u64"))?,
-                                account_contract_id: wallet.contract_id
-                            }
+                    app_config.wallet.execute(
+                        ContractCallInput::CradleAccount(
+                            CradleAccountFunctionInput::UnLockAsset(
+                                UnLockAssetArgs {
+                                    asset: asset_record.token,
+                                    amount: amount.to_u64().ok_or_else(||anyhow!("Amount too large"))?,
+                                    account_contract_id: wallet.contract_id
+                                }
+                            )
                         )
-                    )
-                ).await?;
-
-
-                if let ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::UnLockAsset(_)) = res {
-                    Ok(OrderBookProcessorOutput::UnLockWalletAssets)
-                }else{
-                    Err(anyhow!("Unexpected contract call output"))
-                }
+                    ).await
+                }.await;
+                
+                Ok(OrderBookProcessorOutput::UnLockWalletAssets)
             }
         }
 
