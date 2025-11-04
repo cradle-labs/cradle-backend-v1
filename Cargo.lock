@@ -535,7 +535,7 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 [[package]]
 name = "contract-integrator"
 version = "0.1.0"
-source = "git+https://github.com/cradle-labs/cradle-contract-integrator-v1.git#d960348a6d21e4d20c2f1945c225e944f6408623"
+source = "git+https://github.com/cradle-labs/cradle-contract-integrator-v1.git#c0264f74e573aa74484d22bfa1260a764763281d"
 dependencies = [
  "anyhow",
  "bigdecimal",
@@ -1239,7 +1239,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "hedera"
 version = "0.41.0"
-source = "git+https://github.com/hiero-ledger/hiero-sdk-rust.git#1e6b43636c57c48ceec8e582ece8036518614d37"
+source = "git+https://github.com/hiero-ledger/hiero-sdk-rust.git#f9e918970fac679fed2c7119ac09edd97b6cb59e"
 dependencies = [
  "aes",
  "arc-swap",
@@ -1292,7 +1292,7 @@ dependencies = [
 [[package]]
 name = "hedera-proto"
 version = "0.19.0"
-source = "git+https://github.com/hiero-ledger/hiero-sdk-rust.git#1e6b43636c57c48ceec8e582ece8036518614d37"
+source = "git+https://github.com/hiero-ledger/hiero-sdk-rust.git#f9e918970fac679fed2c7119ac09edd97b6cb59e"
 dependencies = [
  "anyhow",
  "fraction",
