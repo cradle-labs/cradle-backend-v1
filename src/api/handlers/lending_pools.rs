@@ -114,6 +114,10 @@ pub async fn get_pool_snapshot(
     let pool_id = uuid::Uuid::parse_str(&id)
         .map_err(|_| ApiError::bad_request("Invalid pool ID format"))?;
 
+    let create_snapshot_action = ActionRouterInput::Pool(LendingPoolFunctionsInput::CreateSnapShot(pool_id));
+
+    let _ = create_snapshot_action.process(app_config.clone()).await.map_err(|_|ApiError::internal_error("Failed to create snapshot"))?;
+
     let action = ActionRouterInput::Pool(LendingPoolFunctionsInput::GetSnapShot(pool_id));
 
     let result = action

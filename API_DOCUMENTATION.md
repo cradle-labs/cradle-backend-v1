@@ -379,6 +379,38 @@ GET /loans/wallet/990e8400-e29b-41d4-a716-446655440000
 }
 ```
 
+### 4. Get Loan
+**Route:** `GET /loan/{id}`
+
+**Description:** Retrieve all loans associated with a specific wallet.
+
+**Request:**
+```
+GET /loans/990e8400-e29b-41d4-a716-446655440000
+```
+
+**Path Parameters:**
+- `id` (UUID, required): Wallet UUID
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "data": 
+    {
+      "id": "770e8400-e29b-41d4-a716-446655440000",
+      "account_id": "880e8400-e29b-41d4-a716-446655440000",
+      "wallet_id": "990e8400-e29b-41d4-a716-446655440000",
+      "pool": "550e8400-e29b-41d4-a716-446655440000",
+      "borrow_index": "1.05",
+      "principal_amount": "10000.00",
+      "created_at": "2024-01-10T08:15:00",
+      "status": "active",
+      "transaction": "0x1234567890abcdef"
+    }
+}
+```
+
 **Errors:**
 - `400 Bad Request`: Invalid wallet ID format
 
