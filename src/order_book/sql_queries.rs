@@ -97,40 +97,47 @@ pub fn get_order_fill_trades(
     let mut unfilled_ask = incoming.ask_amount.clone() - incoming.filled_ask_amount.clone();
     let mut trades: Vec<CreateOrderBookTrade> = Vec::new();
 
-    let ratio = incoming.bid_amount.clone() / incoming.ask_amount.clone();
-
     for matching_order in matches.into_iter() {
-        if unfilled_ask <= BigDecimal::from(0) || remaining_bid <= BigDecimal::from(0) {
+        if unfilled_ask.clone() <= BigDecimal::from(0) || remaining_bid.clone() <= BigDecimal::from(0) {
             break;
         }
 
-        // The incoming order offers bid_amount to get ask_amount
-        // The matching order (maker) offers ask_amount to get bid_amount
-        // So: incoming.bid_amount should match maker.ask_amount
-        //     incoming.ask_amount should match maker.bid_amount
+        // use maker's ratio
+        let maker_ratio = matching_order.remaining_bid_amount.clone() / matching_order.remaining_ask_amount.clone();
 
-        // Determine how much of the incoming ask_amount can be filled
-        // Limited by: 1) what's remaining in incoming ask, 2) what maker can provide (remaining_ask_amount)
-        let taker_fill_ask = unfilled_ask.clone().min(matching_order.remaining_ask_amount.clone());
+        // use maker's bid as the cap
+        let max_by_taker_ask = unfilled_ask.clone().min(matching_order.remaining_bid_amount.clone());
 
-        // Calculate corresponding bid amount using the incoming order's price ratio
-        let taker_fill_bid = &taker_fill_ask * &ratio;
+        // use maker's ask as the cap
+        let max_by_taker_bid = remaining_bid.clone().min(matching_order.remaining_ask_amount.clone());
 
-        // Limit by what the maker can actually buy (their remaining_bid_amount)
-        let maker_can_provide_bid = matching_order.remaining_bid_amount.clone();
-        let actual_taker_fill_bid = taker_fill_bid.min(maker_can_provide_bid);
+        // use ratio
+        let bid_fill_from_ask_constraint = &max_by_taker_ask / &maker_ratio;
 
-        // Recalculate ask amount based on actual bid fill
-        let actual_taker_fill_ask = &actual_taker_fill_bid / &ratio;
+        // use ratio
+        let ask_fill_from_bid_constraint = &max_by_taker_bid * &maker_ratio;
 
+        // more restrictive wins
+        let (actual_taker_fill_bid, actual_taker_fill_ask) =
+            if bid_fill_from_ask_constraint <= max_by_taker_bid {
+                // Taker's ask side (what they're offering) is the limiting factor
+                (bid_fill_from_ask_constraint, max_by_taker_ask)
+            } else {
+                // Taker's bid side (what they want) is the limiting factor
+                (max_by_taker_bid, ask_fill_from_bid_constraint)
+            };
+
+        // Update remaining amounts
         unfilled_ask -= &actual_taker_fill_ask;
         remaining_bid -= &actual_taker_fill_bid;
-
+        
+        // - Taker gives: actual_taker_fill_ask → Maker receives this (fills maker's bid)
+        // - Maker gives: actual_taker_fill_bid → Taker receives this (fills taker's bid)
         trades.push(CreateOrderBookTrade {
             maker_order_id: matching_order.id.clone(),
             taker_order_id: incoming.id.clone(),
-            maker_filled_amount: actual_taker_fill_bid,
-            taker_filled_amount: actual_taker_fill_ask
+            maker_filled_amount: actual_taker_fill_ask,  // Amount maker receives (their bid being filled)
+            taker_filled_amount: actual_taker_fill_bid   // Amount taker receives (their bid being filled)
         });
     }
 
