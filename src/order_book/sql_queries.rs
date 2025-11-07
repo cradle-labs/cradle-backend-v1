@@ -2,7 +2,7 @@ use diesel::PgConnection;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::prelude::*;
 use anyhow::Result;
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, RoundingMode};
 use uuid::Uuid;
 use crate::order_book::db_types::{CreateOrderBookTrade, MatchingOrderResult, OrderBookRecord};
 
@@ -126,7 +126,14 @@ pub fn get_order_fill_trades(
                 // Taker's bid side (what they want) is the limiting factor
                 (max_by_taker_bid, ask_fill_from_bid_constraint)
             };
-
+    
+        let actual_taker_fill_bid = actual_taker_fill_bid.with_scale_round(0, RoundingMode::Down);
+        let actual_taker_fill_ask = actual_taker_fill_ask.with_scale_round(0, RoundingMode::Down);
+        
+        if actual_taker_fill_bid < BigDecimal::from(0) || actual_taker_fill_ask > BigDecimal::from(0) {
+            continue;
+        }
+        
         // Update remaining amounts
         unfilled_ask -= &actual_taker_fill_ask;
         remaining_bid -= &actual_taker_fill_bid;

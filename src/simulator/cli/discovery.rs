@@ -27,7 +27,6 @@ pub fn discover_accounts(
 
     let accounts = cradleaccounts
         .filter(linked_account_id.like(format!("{}%", account_prefix)))
-        .filter(created_at.lt(cutoff_date))  // older than Nov 3rd, 2025
         .load::<CradleAccountRecord>(conn)?;
 
     Ok(accounts)

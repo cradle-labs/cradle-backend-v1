@@ -28,6 +28,9 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
         use crate::schema::orderbooktrades;
         use crate::schema::cradlewalletaccounts;
         use crate::schema::asset_book;
+        
+        let disable_onchain_interactions = env::var("DISABLE_ONCHAIN_INTERACTIONS").unwrap_or("false".to_string()) == "true";
+        
         match self {
             OrderBookProcessorInput::PlaceOrder(args) => {
                 // Lock assets in wallet before anything
@@ -53,6 +56,7 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
 
                 let matching_orders = get_matching_orders(app_conn, order.id.clone()).await?;
                 let (remaining_bid, unfilled_ask, trades) = get_order_fill_trades(&order, matching_orders);
+                println!("Order trades :: {:?}", trades.clone());
 
                 // Handle FillOrKill
                 if let Some(FillMode::FillOrKill) = args.mode {
@@ -132,7 +136,10 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 ))
             }
             OrderBookProcessorInput::SettleOrder(order_id) => {
-                // TODO: handle onchain settle for all trades matched to the provided order
+                
+                if disable_onchain_interactions {
+                    return Ok(OrderBookProcessorOutput::SettleOrder)
+                }
                 let trades = orderbooktrades::dsl::orderbooktrades.filter(
                     orderbooktrades::taker_order_id.eq(order_id).and(
                         orderbooktrades::settlement_status.eq(crate::order_book::db_types::SettlementStatus::Matched)
@@ -253,33 +260,44 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 Ok(OrderBookProcessorOutput::SettleOrder)
             }
             OrderBookProcessorInput::UpdateOrderFill(order_id, remaining_bid, unfilled_ask, trades) => {
-                use std::collections::VecDeque;
-                
-                // Queue to process orders iteratively
+                use std::collections::{VecDeque, HashSet};
+
                 let mut orders_to_update: VecDeque<(Uuid, BigDecimal, BigDecimal, Vec<CreateOrderBookTrade>)> = VecDeque::new();
+                let mut visited: HashSet<Uuid> = HashSet::new();
+                let zero = BigDecimal::from(0);
+
                 orders_to_update.push_back((order_id.clone(), remaining_bid.clone(), unfilled_ask.clone(), trades.clone()));
-                
+
                 while let Some((current_order_id, current_remaining_bid, current_unfilled_ask, current_trades)) = orders_to_update.pop_front() {
+                    if !visited.insert(current_order_id) {
+                        continue; // already handled in this pass
+                    }
+
                     let order = orderbook::dsl::orderbook
                         .filter(orderbook::id.eq(current_order_id.clone()))
                         .first::<OrderBookRecord>(app_conn)?;
 
-                    let new_filled_bid = &order.filled_bid_amount + (order.bid_amount.clone() - current_remaining_bid.clone());
-                    let new_filled_ask = &order.filled_ask_amount + (order.ask_amount.clone() - current_unfilled_ask.clone());
-                    let new_status = if current_remaining_bid.clone() == BigDecimal::from(0) 
-                        && current_unfilled_ask.clone() == BigDecimal::from(0) {
+                    // ---- ABSOLUTE totals (no double add) ----
+                    let target_filled_bid = (order.bid_amount.clone() - current_remaining_bid.clone()).max(zero.clone());
+                    let target_filled_ask = (order.ask_amount.clone() - current_unfilled_ask.clone()).max(zero.clone());
+
+                    // Deltas for side effects (unlock just the increment)
+                    let delta_bid = (&target_filled_bid - &order.filled_bid_amount).max(zero.clone());
+                    let _delta_ask = (&target_filled_ask - &order.filled_ask_amount).max(zero.clone()); // mirror if you lock ask elsewhere
+
+                    let new_status = if current_remaining_bid == zero && current_unfilled_ask == zero {
                         OrderStatus::Closed
                     } else {
                         OrderStatus::Open
                     };
 
-                    // Update database
+                    // ---- Persist absolute filled values ----
                     match new_status {
                         OrderStatus::Closed => {
                             diesel::update(orderbook::table.filter(orderbook::id.eq(current_order_id.clone())))
                                 .set((
-                                    orderbook::filled_bid_amount.eq(new_filled_bid.clone()),
-                                    orderbook::filled_ask_amount.eq(new_filled_ask.clone()),
+                                    orderbook::filled_bid_amount.eq(&target_filled_bid),
+                                    orderbook::filled_ask_amount.eq(&target_filled_ask),
                                     orderbook::status.eq(new_status),
                                     orderbook::filled_at.eq(Utc::now().naive_utc())
                                 ))
@@ -288,43 +306,54 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                         _ => {
                             diesel::update(orderbook::table.filter(orderbook::id.eq(current_order_id.clone())))
                                 .set((
-                                    orderbook::filled_bid_amount.eq(new_filled_bid.clone()),
-                                    orderbook::filled_ask_amount.eq(new_filled_ask.clone()),
+                                    orderbook::filled_bid_amount.eq(&target_filled_bid),
+                                    orderbook::filled_ask_amount.eq(&target_filled_ask),
                                     orderbook::status.eq(new_status)
                                 ))
                                 .execute(app_conn)?;
                         }
                     }
 
-                    // Unlock assets
-                    let unlock_asset_request = ActionRouterInput::OrderBook(
-                        OrderBookProcessorInput::UnLockWalletAssets(
-                            order.wallet.clone(),
-                            order.bid_asset.clone(),
-                            new_filled_bid.clone()
-                        )
-                    );
-                    Box::pin(unlock_asset_request.process(app_config.clone())).await?;
+                    // ---- Unlock ONLY the delta (keep your routing; no batching/locks) ----
+                    if delta_bid > zero {
+                        let unlock_asset_request = ActionRouterInput::OrderBook(
+                            OrderBookProcessorInput::UnLockWalletAssets(
+                                order.wallet.clone(),
+                                order.bid_asset.clone(),
+                                delta_bid
+                            )
+                        );
+                        Box::pin(unlock_asset_request.process(app_config.clone())).await?;
+                    }
 
-                    // Queue remaining trades for processing (instead of recursive calls)
+                    // ---- Enqueue related maker orders once; avoid local cycles ----
                     let remaining_trades: Vec<&CreateOrderBookTrade> = current_trades
                         .iter()
-                        .filter(|v| v.maker_order_id != current_order_id.clone())
+                        .filter(|v| v.maker_order_id != current_order_id)
                         .collect();
 
                     for trade in remaining_trades {
+                        if visited.contains(&trade.maker_order_id) {
+                            continue;
+                        }
+
                         let trade_order = orderbook::dsl::orderbook
-                            .filter(orderbook::id.eq(trade.maker_order_id.clone()))
+                            .filter(orderbook::id.eq(trade.maker_order_id))
                             .get_result::<OrderBookRecord>(app_conn)?;
 
-                        let remaining_bid = &trade_order.bid_amount - (&trade_order.filled_bid_amount + trade.maker_filled_amount.clone());
-                        let remaining_ask = &trade_order.ask_amount - (&trade_order.filled_ask_amount + trade.taker_filled_amount.clone());
+                        // after applying this trade to maker, what remains?
+                        let maker_target_filled_bid = (&trade_order.filled_bid_amount + trade.maker_filled_amount.clone())
+                            .min(trade_order.bid_amount.clone());
+                        let maker_target_filled_ask = (&trade_order.filled_ask_amount + trade.taker_filled_amount.clone())
+                            .min(trade_order.ask_amount.clone());
 
-                        // Add to queue instead of recursive call
+                        let rem_bid = (&trade_order.bid_amount - maker_target_filled_bid).max(zero.clone());
+                        let rem_ask = (&trade_order.ask_amount - maker_target_filled_ask).max(zero.clone());
+
                         orders_to_update.push_back((
-                            trade.maker_order_id.clone(),
-                            remaining_bid,
-                            remaining_ask,
+                            trade.maker_order_id,
+                            rem_bid,
+                            rem_ask,
                             Vec::new()
                         ));
                     }
@@ -390,6 +419,10 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 Ok(OrderBookProcessorOutput::GetOrders(orders))
             },
             OrderBookProcessorInput::LockWalletAssets(wallet_id, asset, amount) => {
+                
+                if disable_onchain_interactions {
+                    return Ok(OrderBookProcessorOutput::LockWalletAssets);
+                }
 
                 let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts.filter(
                     cradlewalletaccounts::dsl::id.eq(wallet_id.clone())
@@ -419,6 +452,9 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 }
             },
             OrderBookProcessorInput::UnLockWalletAssets(wallet_id, asset, amount) => {
+                if disable_onchain_interactions {
+                    return Ok(OrderBookProcessorOutput::UnLockWalletAssets);
+                }
                 let _ = async {
                     let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts
                         .filter(cradlewalletaccounts::dsl::id.eq(wallet_id.clone()))
