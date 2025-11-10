@@ -125,7 +125,7 @@ pub fn get_order_fill_trades(
         println!("Max taker bid {:?}", max_by_taker_bid.clone().to_string());
 
         // use ratio
-        let bid_fill_from_ask_constraint = &max_by_taker_ask / &maker_ratio;
+        let bid_fill_from_ask_constraint = (&max_by_taker_ask / &maker_ratio);
 
         println!(
             "Bid fill from ask {:?}",
@@ -133,7 +133,7 @@ pub fn get_order_fill_trades(
         );
 
         // use ratio
-        let ask_fill_from_bid_constraint = &max_by_taker_bid * &maker_ratio;
+        let ask_fill_from_bid_constraint = (&max_by_taker_bid * &maker_ratio);
 
         println!(
             "Ask fill from bid {:?}",
@@ -150,8 +150,8 @@ pub fn get_order_fill_trades(
                 (max_by_taker_bid, ask_fill_from_bid_constraint)
             };
 
-        let actual_taker_fill_bid = actual_taker_fill_bid.with_scale_round(0, RoundingMode::Down);
-        let actual_taker_fill_ask = actual_taker_fill_ask.with_scale_round(0, RoundingMode::Down);
+        let actual_taker_fill_bid = actual_taker_fill_bid.with_scale_round(0, RoundingMode::HalfUp);
+        let actual_taker_fill_ask = actual_taker_fill_ask.with_scale_round(0, RoundingMode::HalfUp);
 
         if actual_taker_fill_bid <= BigDecimal::from(0)
             || actual_taker_fill_ask <= BigDecimal::from(0)
