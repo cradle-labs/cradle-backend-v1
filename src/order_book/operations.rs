@@ -1,3 +1,5 @@
+use std::env;
+
 use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::Utc;
 use contract_integrator::utils::functions::cradle_account::TransferAssetArgs;
@@ -20,6 +22,10 @@ enum OrderActionSide {
     Ask
 }
 
+fn can_execute_onchain()->bool {
+    env::var("DISABLE_ONCHAIN_INTERACTIONS").unwrap_or("false".to_string()) != "true".to_string()
+}
+
 pub async fn unlock_asset(
     config: &mut AppConfig,
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
@@ -27,6 +33,12 @@ pub async fn unlock_asset(
     asset: Uuid,
     amount: u64
 ) -> Result<()> {
+
+    let execute = can_execute_onchain();
+
+    if !execute {
+        return Ok(());
+    }
 
     let wallet = {
         use crate::schema::cradlewalletaccounts::dsl::*;
@@ -67,6 +79,14 @@ pub async fn lock_asset(
     asset: Uuid,
     amount: u64
 )-> Result<()> {
+
+    
+    let execute = can_execute_onchain();
+
+    if !execute {
+        return Ok(());
+    }
+    
     let wallet = {
         use crate::schema::cradlewalletaccounts::dsl::*;
          cradlewalletaccounts.filter(
@@ -244,6 +264,14 @@ pub async fn asset_transfer(
     sending_asset: AssetBookRecord,
     receiver_account: CradleWalletAccountRecord
 )-> Result<String> {
+
+
+    let execute = can_execute_onchain();
+
+    if !execute {
+        return Ok(Uuid::new_v4().to_string());
+    }
+    
     let normalized_amount = amount.to_u64().ok_or_else(|| anyhow!("Amount too large"))?;
     
     let res = wallet.execute(
@@ -279,6 +307,12 @@ pub async fn settle_onchain(
     taker_transfer_asset: AssetBookRecord
 )-> Result<String> {
 
+    
+    let execute = can_execute_onchain();
+
+    if !execute {
+        return Ok(Uuid::new_v4().to_string());
+    }
     let maker_transfer_amount = _maker_transfer_amount.to_u64().ok_or_else(||anyhow!("value too big"))?;
     let taker_transfer_amount = _taker_transfer_amount.to_u64().ok_or_else(||anyhow!("value too big"))?;
 
