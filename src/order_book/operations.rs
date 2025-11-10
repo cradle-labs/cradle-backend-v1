@@ -120,7 +120,8 @@ pub async fn settle_order(
         let ( maker_order, maker_asset, maker_wallet  ) = get_order_data(conn, trade.maker_order_id)?;          
         let ( taker_order, taker_asset, taker_wallet) = get_order_data(conn, trade.taker_order_id)?;
 
-        let settlement_tx_id = settle_onchain(
+        // TODO: trigger unlocking within contract itself
+        let settlement_tx_id = match settle_onchain(
             action_wallet,
             maker_wallet.clone(),
             taker_wallet.clone(),
@@ -128,7 +129,14 @@ pub async fn settle_order(
             trade.maker_filled_amount.clone(),
             taker_asset,
             maker_asset
-        ).await?;
+        ).await {
+            Ok(tx)=>tx,
+            Err(e)=>{
+                println!("Settlement Failed with error:: {:?}", e);
+                // TODO: add more graceful error handling so that the amount that eventually gets unlocked is valid
+                continue;
+            }
+        };
 
 
         println!("Settlement tx id :: {:?}", settlement_tx_id);
@@ -400,9 +408,10 @@ pub async fn close_order(
     let _ = diesel::update(OrderBookTable)
         .filter(
             id.eq(order_id)
-        ).set(
+        ).set((
+            filled_at.eq(Utc::now().naive_utc()),
             status.eq(OrderStatus::Closed)
-        ).execute(conn)?;
+        )).execute(conn)?;
     
     
     Ok(OrderStatus::Closed)
