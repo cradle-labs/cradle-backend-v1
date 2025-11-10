@@ -1,10 +1,10 @@
-use diesel::PgConnection;
-use diesel::r2d2::{ConnectionManager, PooledConnection};
-use diesel::prelude::*;
+use crate::order_book::db_types::{CreateOrderBookTrade, MatchingOrderResult, OrderBookRecord};
 use anyhow::Result;
 use bigdecimal::{BigDecimal, RoundingMode};
+use diesel::PgConnection;
+use diesel::prelude::*;
+use diesel::r2d2::{ConnectionManager, PooledConnection};
 use uuid::Uuid;
-use crate::order_book::db_types::{CreateOrderBookTrade, MatchingOrderResult, OrderBookRecord};
 
 const MATCHING_ORDERS: &str = r"
 -- Find orders that can fill an incoming order (supports both market and limit orders)
@@ -56,7 +56,7 @@ WHERE
         OR
         -- If incoming order is LIMIT, enforce price compatibility
         -- Incoming order asks for ob.ask_asset and offers ob.bid_asset
-        -- For proper matching: incoming price must satisfy the maker's price
+            -- For proper matching: incoming price must satisfy the maker's price
         (io.order_type = 'limit' AND io.price >= ob.price)
     )
 
@@ -78,9 +78,10 @@ ORDER BY
 ;
 ";
 
-
-pub async fn get_matching_orders(conn: &mut PooledConnection<ConnectionManager<PgConnection>>, incoming_order: Uuid)->Result<Vec<MatchingOrderResult>> {
-
+pub async fn get_matching_orders(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    incoming_order: Uuid,
+) -> Result<Vec<MatchingOrderResult>> {
     let result = diesel::sql_query(MATCHING_ORDERS)
         .bind::<diesel::sql_types::Uuid, _>(&incoming_order)
         .get_results::<MatchingOrderResult>(conn)?;
@@ -88,34 +89,56 @@ pub async fn get_matching_orders(conn: &mut PooledConnection<ConnectionManager<P
     Ok(result)
 }
 
-
 pub fn get_order_fill_trades(
     incoming: &OrderBookRecord,
-    matches: Vec<MatchingOrderResult>
+    matches: Vec<MatchingOrderResult>,
 ) -> (BigDecimal, BigDecimal, Vec<CreateOrderBookTrade>) {
     let mut remaining_bid = incoming.bid_amount.clone() - incoming.filled_bid_amount.clone();
     let mut unfilled_ask = incoming.ask_amount.clone() - incoming.filled_ask_amount.clone();
     let mut trades: Vec<CreateOrderBookTrade> = Vec::new();
 
     for matching_order in matches.into_iter() {
-        if unfilled_ask.clone() <= BigDecimal::from(0) || remaining_bid.clone() <= BigDecimal::from(0) {
+        if unfilled_ask.clone() <= BigDecimal::from(0)
+            || remaining_bid.clone() <= BigDecimal::from(0)
+        {
             break;
         }
 
         // use maker's ratio
-        let maker_ratio = matching_order.remaining_bid_amount.clone() / matching_order.remaining_ask_amount.clone();
+        let maker_ratio = matching_order.remaining_bid_amount.clone()
+            / matching_order.remaining_ask_amount.clone();
+
+        println!("Maker ratio :: {}", maker_ratio.clone());
 
         // use maker's bid as the cap
-        let max_by_taker_ask = unfilled_ask.clone().min(matching_order.remaining_bid_amount.clone());
+        let max_by_taker_ask = unfilled_ask
+            .clone()
+            .min(matching_order.remaining_bid_amount.clone());
+
+        println!("Max taker ask {:?}", max_by_taker_ask.clone().to_string());
 
         // use maker's ask as the cap
-        let max_by_taker_bid = remaining_bid.clone().min(matching_order.remaining_ask_amount.clone());
+        let max_by_taker_bid = remaining_bid
+            .clone()
+            .min(matching_order.remaining_ask_amount.clone());
+
+        println!("Max taker bid {:?}", max_by_taker_bid.clone().to_string());
 
         // use ratio
         let bid_fill_from_ask_constraint = &max_by_taker_ask / &maker_ratio;
 
+        println!(
+            "Bid fill from ask {:?}",
+            bid_fill_from_ask_constraint.clone().to_string()
+        );
+
         // use ratio
         let ask_fill_from_bid_constraint = &max_by_taker_bid * &maker_ratio;
+
+        println!(
+            "Ask fill from bid {:?}",
+            ask_fill_from_bid_constraint.clone().to_string()
+        );
 
         // more restrictive wins
         let (actual_taker_fill_bid, actual_taker_fill_ask) =
@@ -126,25 +149,25 @@ pub fn get_order_fill_trades(
                 // Taker's bid side (what they want) is the limiting factor
                 (max_by_taker_bid, ask_fill_from_bid_constraint)
             };
-    
+
         let actual_taker_fill_bid = actual_taker_fill_bid.with_scale_round(0, RoundingMode::Down);
         let actual_taker_fill_ask = actual_taker_fill_ask.with_scale_round(0, RoundingMode::Down);
-        
-        if actual_taker_fill_bid < BigDecimal::from(0) || actual_taker_fill_ask > BigDecimal::from(0) {
+
+        if actual_taker_fill_bid <= BigDecimal::from(0)
+            || actual_taker_fill_ask <= BigDecimal::from(0)
+        {
             continue;
         }
-        
+
         // Update remaining amounts
         unfilled_ask -= &actual_taker_fill_ask;
         remaining_bid -= &actual_taker_fill_bid;
-        
-        // - Taker gives: actual_taker_fill_ask → Maker receives this (fills maker's bid)
-        // - Maker gives: actual_taker_fill_bid → Taker receives this (fills taker's bid)
+
         trades.push(CreateOrderBookTrade {
             maker_order_id: matching_order.id.clone(),
             taker_order_id: incoming.id.clone(),
-            maker_filled_amount: actual_taker_fill_ask,  // Amount maker receives (their bid being filled)
-            taker_filled_amount: actual_taker_fill_bid   // Amount taker receives (their bid being filled)
+            maker_filled_amount: actual_taker_fill_ask, // Amount maker will give to taker
+            taker_filled_amount: actual_taker_fill_bid, // Amount taker will give to maker
         });
     }
 

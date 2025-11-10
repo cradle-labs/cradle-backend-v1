@@ -598,6 +598,7 @@ dependencies = [
  "diesel-derive-enum",
  "dotenvy",
  "hyper 1.7.0",
+ "once_cell",
  "rand 0.8.5",
  "serde",
  "serde_json",
