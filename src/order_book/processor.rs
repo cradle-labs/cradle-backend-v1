@@ -35,10 +35,10 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 let mut args = _args.clone();
                 args.ask_amount = args
                     .ask_amount
-                    .with_scale_round(0, bigdecimal::RoundingMode::Down);
+                    .with_scale_round(0, bigdecimal::RoundingMode::HalfUp);
                 args.bid_amount = args
                     .bid_amount
-                    .with_scale_round(0, bigdecimal::RoundingMode::Down);
+                    .with_scale_round(0, bigdecimal::RoundingMode::HalfUp);
 
                 lock_asset(
                     app_config,
