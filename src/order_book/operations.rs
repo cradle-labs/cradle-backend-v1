@@ -316,18 +316,23 @@ pub async fn settle_onchain(
     let maker_transfer_amount = _maker_transfer_amount.to_u64().ok_or_else(||anyhow!("value too big"))?;
     let taker_transfer_amount = _taker_transfer_amount.to_u64().ok_or_else(||anyhow!("value too big"))?;
 
+    println!("Maker Address:: {:?} ", maker.address.clone());
+    println!("Taker Address:: {:?}", taker.address.clone());
+    println!("Bid Asset:: {:?}", maker_transfer_asset.token.clone());
+    println!("Ask Asset:: {:?} ", taker_transfer_asset.token.clone());
+    println!("Bid Amount:: {:?} ", maker_transfer_amount.to_string());
+    println!("Ask Amount:: {:?} ", taker_transfer_amount.to_string());
     
-        
     let res = wallet.execute(
        ContractCallInput::OrderBookSettler(
            orderbook_settler::OrderBookSettlerFunctionInput::SettleOrder(
                orderbook_settler::SettleOrderInputArgs {
                    bidder: maker.address,
                    asker: taker.address,
-                   bid_asset: maker_transfer_asset.token,
-                   ask_asset: taker_transfer_asset.token,
-                   bid_asset_amount: maker_transfer_amount,
-                   ask_asset_amount: taker_transfer_amount
+                   bid_asset: taker_transfer_asset.token,
+                   ask_asset: maker_transfer_asset.token,
+                   bid_asset_amount: taker_transfer_amount,
+                   ask_asset_amount: maker_transfer_amount
                }
            )
        )
