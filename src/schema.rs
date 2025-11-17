@@ -26,6 +26,10 @@ pub mod sql_types {
     pub struct FillMode;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "listing_status"))]
+    pub struct ListingStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "loan_status"))]
     pub struct LoanStatus;
 
@@ -60,6 +64,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "time_series_interval"))]
     pub struct TimeSeriesInterval;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "transaction_type"))]
+    pub struct TransactionType;
 }
 
 diesel::table! {
@@ -72,6 +80,23 @@ diesel::table! {
         associated_at -> Nullable<Timestamp>,
         kyced_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::TransactionType;
+
+    accountassetsledger (id) {
+        id -> Uuid,
+        timestamp -> Timestamp,
+        transaction -> Nullable<Text>,
+        from_address -> Text,
+        to_address -> Text,
+        asset -> Uuid,
+        transaction_type -> TransactionType,
+        amount -> Numeric,
+        refference -> Nullable<Text>,
     }
 }
 
@@ -103,6 +128,41 @@ diesel::table! {
         created_at -> Timestamp,
         account_type -> Cradleaccounttype,
         status -> Cradleaccountstatus,
+    }
+}
+
+diesel::table! {
+    cradlelistedcompanies (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        listed_at -> Nullable<Timestamp>,
+        legal_documents -> Text,
+        beneficiary_wallet -> Uuid,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::ListingStatus;
+
+    cradlenativelistings (id) {
+        id -> Uuid,
+        listing_contract_id -> Text,
+        name -> Text,
+        description -> Text,
+        documents -> Text,
+        company -> Uuid,
+        status -> ListingStatus,
+        created_at -> Timestamp,
+        opened_at -> Nullable<Timestamp>,
+        stopped_at -> Nullable<Timestamp>,
+        listed_asset -> Uuid,
+        purchase_with_asset -> Uuid,
+        purchase_price -> Numeric,
+        max_supply -> Numeric,
+        treasury -> Uuid,
+        shadow_asset -> Uuid,
     }
 }
 
@@ -145,6 +205,7 @@ diesel::table! {
         description -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        yield_asset -> Uuid,
     }
 }
 
@@ -307,8 +368,11 @@ diesel::table! {
 
 diesel::joinable!(accountassetbook -> asset_book (asset_id));
 diesel::joinable!(accountassetbook -> cradlewalletaccounts (account_id));
+diesel::joinable!(accountassetsledger -> asset_book (asset));
+diesel::joinable!(cradlelistedcompanies -> cradlewalletaccounts (beneficiary_wallet));
+diesel::joinable!(cradlenativelistings -> cradlelistedcompanies (company));
+diesel::joinable!(cradlenativelistings -> cradlewalletaccounts (treasury));
 diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
-diesel::joinable!(lendingpool -> asset_book (reserve_asset));
 diesel::joinable!(lendingpoolsnapshots -> lendingpool (lending_pool_id));
 diesel::joinable!(loanliquidations -> cradlewalletaccounts (liquidator_wallet_id));
 diesel::joinable!(loanliquidations -> loans (loan_id));
@@ -325,8 +389,11 @@ diesel::joinable!(pooltransactions -> lendingpool (pool_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     accountassetbook,
+    accountassetsledger,
     asset_book,
     cradleaccounts,
+    cradlelistedcompanies,
+    cradlenativelistings,
     cradlewalletaccounts,
     kvstore,
     lendingpool,

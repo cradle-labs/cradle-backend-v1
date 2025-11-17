@@ -1,17 +1,17 @@
+use crate::asset_book::db_types::{AssetBookRecord, AssetType};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::asset_book::db_types::{AssetBookRecord, AssetType};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CreateNewAssetInputArgs {
     pub asset_type: AssetType,
     pub name: String,
     pub symbol: String,
     pub decimals: i32,
-    pub icon: String
+    pub icon: String,
 }
 
-#[derive(Deserialize,Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct CreateExistingAssetInputArgs {
     pub asset_manager: Option<String>,
     pub token: String,
@@ -19,25 +19,24 @@ pub struct CreateExistingAssetInputArgs {
     pub name: String,
     pub symbol: String,
     pub decimals: i32,
-    pub icon: String
+    pub icon: String,
 }
 #[derive(Deserialize, Serialize, Debug)]
 pub enum GetAssetInputArgs {
     ById(Uuid),
     ByToken(String),
-    ByAssetManager(String)
+    ByAssetManager(String),
 }
 #[derive(Deserialize, Serialize, Debug)]
 pub enum AssetBookProcessorInput {
     CreateNewAsset(CreateNewAssetInputArgs),
     CreateExistingAsset(CreateExistingAssetInputArgs),
-    GetAsset(GetAssetInputArgs)
+    GetAsset(GetAssetInputArgs),
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 pub enum AssetBookProcessorOutput {
     CreateNewAsset(Uuid),
     CreateExistingAsset(Uuid),
-    GetAsset(AssetBookRecord)
+    GetAsset(AssetBookRecord),
 }
-
