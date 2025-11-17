@@ -1,42 +1,48 @@
 pub mod accounts;
-pub mod api;
-pub mod utils;
-pub mod schema;
+mod accounts_ledger;
 mod action_router;
+mod aggregators;
+pub mod api;
 mod asset_book;
+mod lending_pool;
+mod listing;
 mod market;
 mod market_time_series;
 mod order_book;
-mod lending_pool;
+pub mod schema;
 mod sockets;
-mod aggregators;
+pub mod utils;
 
 use axum::{
+    Router,
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
-use std::env;
 use dotenvy::dotenv;
+use socketioxide::SocketIo;
+use std::env;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber;
-use socketioxide::{
-    SocketIo
-};
 
+use crate::{
+    api::handlers::{
+        faucet_request::airdrop_request,
+        listings::{get_listing_by_id, get_listings},
+    },
+    sockets::on_connect,
+};
 use api::{
     config::ApiConfig,
     error::ApiError,
     handlers::{
-        accounts::*, assets::*, health, lending_pools::*, markets::*, mutation::*,
-        orders::*, time_series::*,
+        accounts::*, assets::*, health, lending_pools::*, markets::*, mutation::*, orders::*,
+        time_series::*,
     },
     middleware::auth::validate_auth,
 };
 use utils::app_config::AppConfig;
-use crate::{api::handlers::faucet_request::airdrop_request, sockets::on_connect};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -86,35 +92,32 @@ async fn main() -> anyhow::Result<()> {
     let router = Router::new()
         // Health check - public endpoint
         .route("/health", get(health::health))
-
         // Mutation endpoint
         .route("/process", post(process_mutation))
-
         // Accounts endpoints
         .route("/accounts/:id", get(get_account_by_id))
         .route("/accounts/linked/:linked_id", get(get_account_by_linked_id))
         .route("/accounts/:account_id/wallets", get(get_account_wallets))
         .route("/wallets/:id", get(get_wallet_by_id))
-        .route("/wallets/account/:account_id", get(get_wallet_by_account_id))
+        .route(
+            "/wallets/account/:account_id",
+            get(get_wallet_by_account_id),
+        )
         .route("/balances/:account_id", get(api_get_account_balances))
-
+        .route("/balance/:wallet_id/:asset_id", get(get_asset_balance))
         // Assets endpoints
         .route("/assets/:id", get(get_asset_by_id))
         .route("/assets/token/:token", get(get_asset_by_token))
         .route("/assets/manager/:manager", get(get_asset_by_manager))
         .route("/assets", get(get_assets))
-
         // Markets endpoints
         .route("/markets/:id", get(get_market_by_id))
         .route("/markets", get(get_markets))
-
         // Orders endpoints
         .route("/orders/:id", get(get_order_by_id))
         .route("/orders", get(get_orders))
-
         // Time series endpoints
         .route("/time-series/history", get(get_time_series_history))
-
         // Lending pools endpoints
         .route("/pools/:id", get(get_pool_by_id))
         .route("/pools/name/:name", get(get_pool_by_name))
@@ -124,31 +127,32 @@ async fn main() -> anyhow::Result<()> {
         .route("/pools/:id/pool-stats", get(get_pool_stats))
         .route("/pools/:id/interest-rates", get(get_interest_rates))
         .route("/pools/:id/collateral-info", get(get_collateral_info))
-        .route("/pools/:pool_id/user-positions/:wallet_id", get(get_user_positions))
-
+        .route(
+            "/pools/:pool_id/user-positions/:wallet_id",
+            get(get_user_positions),
+        )
         // Loan endpoints
         .route("/loans", get(get_all_loans))
         .route("/loan/:loan_id", get(get_loan_by_id))
         .route("/loans/pool/:id", get(get_loans_by_pool))
         .route("/loans/wallet/:id", get(get_loans_by_wallet))
         .route("/loans/status/:status", get(get_loans_by_status))
-
         // Loan repayment endpoints
         .route("/loan-repayments", get(get_all_repayments))
         .route("/loan-repayments/loan/:id", get(get_repayments_by_loan))
-
         // Loan liquidation endpoints
         .route("/loan-liquidations", get(get_all_liquidations))
         .route("/loan-liquidations/loan/:id", get(get_liquidations_by_loan))
-
-        // faucet request 
+        // faucet request
         .route("/faucet", post(airdrop_request))
+        // listings
+        .route("/listings", get(get_listings))
+        .route("/listings/:listing_id", get(get_listing_by_id))
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())
         .layer(auth_layer)
         .layer(socket_layer)
-        .layer(CorsLayer::permissive())// TODO: temp redo correctly once we have a domain
-
+        .layer(CorsLayer::permissive()) // TODO: temp redo correctly once we have a domain
         // Shared state - applied after middleware
         .with_state(app_config);
 

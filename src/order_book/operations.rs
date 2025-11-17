@@ -7,6 +7,8 @@ use contract_integrator::utils::functions::orderbook_settler::OrderBookSettlerFu
 use contract_integrator::wallet::wallet::ActionWallet;
 use diesel::prelude::*;
 use crate::accounts::db_types::CradleWalletAccountRecord;
+use crate::accounts_ledger::db_types::{AccountLedgerTransactionType, CreateLedgerEntry};
+use crate::accounts_ledger::operations::{create_ledger_entry, record_transaction, RecordTransactionAssets};
 use crate::asset_book::db_types::AssetBookRecord;
 use crate::order_book::db_types::{OrderBookRecord, OrderBookTradeRecord, OrderStatus, SettlementStatus};
 use crate::utils::app_config::AppConfig;
@@ -55,20 +57,53 @@ pub async fn unlock_asset(
         ).get_result::<AssetBookRecord>(conn)
     }?;
 
-    let _ = config.wallet.execute(
+    let exec_res = config.wallet.execute(
         contract_integrator::utils::functions::ContractCallInput::CradleAccount(
             contract_integrator::utils::functions::cradle_account::CradleAccountFunctionInput::UnLockAsset(
               contract_integrator::utils::functions::cradle_account::UnLockAssetArgs {
                   asset: asset_record.token,
-                  amount,
+                  amount: amount.clone(),
                   account_contract_id: wallet.contract_id
               }  
             )
         )
     ).await?;
-    
+
    
+    match &exec_res {
+        ContractCallOutput::CradleAccount(cradle_account::CradleAccountFunctionOutput::UnLockAsset(output))=>{
+            
+            let _ = create_ledger_entry(conn, CreateLedgerEntry {
+                transaction: Some(output.transaction_id.clone()),
+                from_address: "system".to_string(),
+                to_address: wallet.address.clone(),
+                asset: asset_record.id,
+                transaction_type: AccountLedgerTransactionType::UnLock,
+                amount: BigDecimal::from(amount),
+                refference: None
+            })?;
+   
+            
+        },
+        _=>return Err(anyhow!("Failed to unlock asets"))
+    }
+
+    
+    let res =  record_transaction(
+        conn,
+        None,
+        Some(wallet.address.clone()),
+        RecordTransactionAssets::Single(asset_record.id),
+        Some(amount),
+        Some(exec_res.clone()),
+        None,
+        None,
+        None
+    )?;
+
     Ok(())
+    
+
 }
 
 
@@ -102,17 +137,30 @@ pub async fn lock_asset(
         ).get_result::<AssetBookRecord>(conn)
     }?;
 
-    let _ = config.wallet.execute(
+    let transaction = config.wallet.execute(
         ContractCallInput::CradleAccount(
             cradle_account::CradleAccountFunctionInput::LockAsset(
                 cradle_account::LockAssetArgs {
                     asset: asset_record.token,
-                    amount,
+                    amount: amount.clone(),
                     account_contract_id: wallet.contract_id
                 }
             )
         )
     ).await?;
+
+    
+     let res =  record_transaction(
+        conn,
+        None,
+        Some(wallet.address),
+        RecordTransactionAssets::Single(asset_record.id),
+        Some(amount),
+        Some(transaction),
+        None,
+        None,
+        None
+    )?;
     
     Ok(())
 }
@@ -140,8 +188,8 @@ pub async fn settle_order(
         let ( maker_order, maker_asset, maker_wallet  ) = get_order_data(conn, trade.maker_order_id)?;          
         let ( taker_order, taker_asset, taker_wallet) = get_order_data(conn, trade.taker_order_id)?;
 
-        // TODO: trigger unlocking within contract itself
         let settlement_tx_id = match settle_onchain(
+            conn,
             action_wallet,
             maker_wallet.clone(),
             taker_wallet.clone(),
@@ -298,6 +346,7 @@ pub async fn asset_transfer(
 }
 
 pub async fn settle_onchain(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     wallet: &mut ActionWallet,
     maker: CradleWalletAccountRecord,
     taker: CradleWalletAccountRecord,
@@ -327,20 +376,76 @@ pub async fn settle_onchain(
        ContractCallInput::OrderBookSettler(
            orderbook_settler::OrderBookSettlerFunctionInput::SettleOrder(
                orderbook_settler::SettleOrderInputArgs {
-                   bidder: maker.address,
-                   asker: taker.address,
+                   bidder: maker.address.clone(),
+                   asker: taker.address.clone(),
                    bid_asset: taker_transfer_asset.token,
                    ask_asset: maker_transfer_asset.token,
-                   bid_asset_amount: taker_transfer_amount,
-                   ask_asset_amount: maker_transfer_amount
+                   bid_asset_amount: taker_transfer_amount.clone(),
+                   ask_asset_amount: maker_transfer_amount.clone()
                }
            )
        )
     ).await?;
 
-    match res {
+    let transaction_id = match &res {
+        ContractCallOutput::OrderBookSettler(OrderBookSettlerFunctionOutput::SettleOrder(o))=>o.transaction_id.clone(),
+        _=>"".to_string()
+    };
+
+    record_transaction(
+        conn,
+        None,
+        Some(maker.address.clone()),
+        RecordTransactionAssets::Single(maker_transfer_asset.id),
+        Some(maker_transfer_amount.clone()),
+        None,
+        Some(AccountLedgerTransactionType::UnLock),
+        Some(transaction_id.clone()),
+        None
+    )?;
+
+     record_transaction(
+        conn,
+        None,
+        Some(taker.address.clone()),
+        RecordTransactionAssets::Single(taker_transfer_asset.id),
+        Some(taker_transfer_amount.clone()),
+        None,
+        Some(AccountLedgerTransactionType::UnLock), 
+        Some(transaction_id.clone()),
+        None
+    )?;
+
+    let maker_amount_less_fee = (0.995 * (maker_transfer_amount as f64)) as u64; 
+    let taker_amount_less_fee = (0.995 * (taker_transfer_amount as f64)) as u64; 
+
+    record_transaction(
+        conn,
+        Some(maker.address.clone()),
+        Some(taker.address.clone()),
+        RecordTransactionAssets::Single(maker_transfer_asset.id),
+        Some(maker_amount_less_fee),
+        None,
+        Some(AccountLedgerTransactionType::Transfer),
+        Some(transaction_id.clone()),
+        None
+    )?;
+    
+    record_transaction(
+        conn,
+        Some(taker.address),
+        Some(maker.address),
+        RecordTransactionAssets::Single(taker_transfer_asset.id),
+        Some(taker_amount_less_fee),
+        None,
+        Some(AccountLedgerTransactionType::Transfer),
+        Some(transaction_id.clone()),
+        None
+    )?;
+
+    match &res {
         ContractCallOutput::OrderBookSettler(OrderBookSettlerFunctionOutput::SettleOrder(output))=>{
-            Ok(output.transaction_id)  
+            Ok(output.transaction_id.clone())  
         },
         _=>Err(anyhow!("Failed to complete transaction"))
     }

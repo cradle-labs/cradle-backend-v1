@@ -1,28 +1,37 @@
 use anyhow::Result;
+use bigdecimal::BigDecimal;
 use colored::Colorize;
 use std::io::Write;
-use bigdecimal::BigDecimal;
 use std::str::FromStr;
 
-use cradle_back_end::lending_pool::processor_enums::{
-    LendingPoolFunctionsInput, GetLendingPoolInput, SupplyLiquidityInputArgs, WithdrawLiquidityInputArgs,
-    TakeLoanInputArgs, RepayLoanInputArgs, LiquidatePositionInputArgs,
+use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
+use cradle_back_end::cli_helper::{call_action_router, execute_with_retry, initialize_app_config};
+use cradle_back_end::cli_utils::{
+    formatting::{format_record, format_table, print_header, print_section},
+    input::Input,
+    menu::Operation,
+    print_info, print_success,
 };
 use cradle_back_end::lending_pool::db_types::CreateLendingPoolRecord;
-use cradle_back_end::cli_utils::{
-    menu::Operation,
-    input::Input,
-    formatting::{format_table, format_record, print_header, print_section},
-    print_success, print_info,
+use cradle_back_end::lending_pool::processor_enums::{
+    GetLendingPoolInput, LendingPoolFunctionsInput, LiquidatePositionInputArgs, RepayLoanInputArgs,
+    SupplyLiquidityInputArgs, TakeLoanInputArgs, WithdrawLiquidityInputArgs,
 };
-use cradle_back_end::cli_helper::{initialize_app_config, call_action_router, execute_with_retry};
-use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    eprintln!("{}", "╔═══════════════════════════════════════════════════════╗".bright_cyan());
-    eprintln!("{}", "║     Cradle Lending Pool Management CLI                ║".bright_cyan());
-    eprintln!("{}", "╚═══════════════════════════════════════════════════════╝".bright_cyan());
+    eprintln!(
+        "{}",
+        "╔═══════════════════════════════════════════════════════╗".bright_cyan()
+    );
+    eprintln!(
+        "{}",
+        "║     Cradle Lending Pool Management CLI                ║".bright_cyan()
+    );
+    eprintln!(
+        "{}",
+        "╚═══════════════════════════════════════════════════════╝".bright_cyan()
+    );
     eprintln!();
 
     eprint!("Initializing app config... ");
@@ -44,7 +53,14 @@ async fn main() -> Result<()> {
 
     loop {
         print_header("Lending Pool Management");
-        let sections = vec!["Pools", "Loans", "Pool Transactions", "Snapshots", "Liquidity Operations", "Exit"];
+        let sections = vec![
+            "Pools",
+            "Loans",
+            "Pool Transactions",
+            "Snapshots",
+            "Liquidity Operations",
+            "Exit",
+        ];
         match Input::select_from_list("Select section", sections)? {
             0 => pools_menu(&app_config).await?,
             1 => loans_menu(&app_config).await?,
@@ -68,7 +84,14 @@ async fn main() -> Result<()> {
 async fn pools_menu(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
     print_header("Pools Management");
 
-    let options = vec!["List All Pools", "Get Pool by ID", "Get Pool by Name", "Get Pool by Address", "Create Pool", "Back"];
+    let options = vec![
+        "List All Pools",
+        "Get Pool by ID",
+        "Get Pool by Name",
+        "Get Pool by Address",
+        "Create Pool",
+        "Back",
+    ];
     match Input::select_from_list("Action", options)? {
         0 => list_pools(app_config).await?,
         1 => get_pool_by_id(app_config).await?,
@@ -116,7 +139,9 @@ async fn get_pool_by_id(app_config: &cradle_back_end::utils::app_config::AppConf
     Ok(())
 }
 
-async fn get_pool_by_name(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn get_pool_by_name(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Get Pool by Name");
 
     let pool_name = Input::get_string("Enter pool name")?;
@@ -142,7 +167,9 @@ async fn get_pool_by_name(app_config: &cradle_back_end::utils::app_config::AppCo
     Ok(())
 }
 
-async fn get_pool_by_address(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn get_pool_by_address(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Get Pool by Address");
 
     let pool_address = Input::get_string("Enter pool address")?;
@@ -174,6 +201,7 @@ async fn create_pool(app_config: &cradle_back_end::utils::app_config::AppConfig)
     let pool_address = Input::get_string("Pool address")?;
     let contract_id = Input::get_string("Pool contract ID")?;
     let reserve_asset = Input::get_uuid("Reserve asset ID")?;
+    let yield_asset = Input::get_uuid("Yiled Asset ID")?;
 
     let ltv_str = Input::get_string("Loan to value ratio")?;
     let ltv = BigDecimal::from_str(&ltv_str)?;
@@ -216,6 +244,7 @@ async fn create_pool(app_config: &cradle_back_end::utils::app_config::AppConfig)
                 name: if name.is_empty() { None } else { Some(name.clone()) },
                 title: if title.is_empty() { None } else { Some(title.clone()) },
                 description: if description.is_empty() { None } else { Some(description.clone()) },
+                yield_asset
             };
 
             let input = LendingPoolFunctionsInput::CreateLendingPool(create_input);
@@ -242,7 +271,12 @@ async fn create_pool(app_config: &cradle_back_end::utils::app_config::AppConfig)
 async fn loans_menu(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
     print_header("Loans Management");
 
-    let options = vec!["List Loans", "View Loan (TODO)", "Create Loan (Borrow)", "Back"];
+    let options = vec![
+        "List Loans",
+        "View Loan (TODO)",
+        "Create Loan (Borrow)",
+        "Back",
+    ];
     match Input::select_from_list("Action", options)? {
         0 => list_loans(app_config).await?,
         1 => view_loan(app_config).await?,
@@ -309,10 +343,17 @@ async fn create_loan(app_config: &cradle_back_end::utils::app_config::AppConfig)
 
 // ========== POOL TRANSACTIONS MENU ==========
 
-async fn pool_transactions_menu(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn pool_transactions_menu(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Pool Transactions");
 
-    let options = vec!["List Transactions (TODO)", "Supply Liquidity", "Withdraw Liquidity", "Back"];
+    let options = vec![
+        "List Transactions (TODO)",
+        "Supply Liquidity",
+        "Withdraw Liquidity",
+        "Back",
+    ];
     match Input::select_from_list("Action", options)? {
         0 => list_transactions(app_config).await?,
         1 => supply_liquidity(app_config).await?,
@@ -323,7 +364,9 @@ async fn pool_transactions_menu(app_config: &cradle_back_end::utils::app_config:
     Ok(())
 }
 
-async fn list_transactions(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn list_transactions(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("List Pool Transactions");
 
     // TODO: Implement GetPoolTransactions when available in processor
@@ -332,7 +375,9 @@ async fn list_transactions(app_config: &cradle_back_end::utils::app_config::AppC
     Ok(())
 }
 
-async fn supply_liquidity(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn supply_liquidity(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Supply Liquidity to Pool");
 
     let wallet = Input::get_uuid("Wallet ID")?;
@@ -366,7 +411,9 @@ async fn supply_liquidity(app_config: &cradle_back_end::utils::app_config::AppCo
     Ok(())
 }
 
-async fn withdraw_liquidity(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn withdraw_liquidity(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Withdraw Liquidity from Pool");
 
     let wallet = Input::get_uuid("Wallet ID")?;
@@ -405,7 +452,12 @@ async fn withdraw_liquidity(app_config: &cradle_back_end::utils::app_config::App
 async fn snapshots_menu(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
     print_header("Pool Snapshots");
 
-    let options = vec!["List Snapshots (TODO)", "Get Latest Snapshot", "Create Snapshot", "Back"];
+    let options = vec![
+        "List Snapshots (TODO)",
+        "Get Latest Snapshot",
+        "Create Snapshot",
+        "Back",
+    ];
     match Input::select_from_list("Action", options)? {
         0 => list_snapshots(app_config).await?,
         1 => get_snapshot(app_config).await?,
@@ -479,7 +531,9 @@ async fn create_snapshot(app_config: &cradle_back_end::utils::app_config::AppCon
 
 // ========== LIQUIDITY OPERATIONS MENU ==========
 
-async fn liquidity_operations_menu(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn liquidity_operations_menu(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Liquidity Operations");
 
     let options = vec!["Repay Loan", "Liquidate Position", "Back"];
@@ -525,7 +579,9 @@ async fn repay_loan(app_config: &cradle_back_end::utils::app_config::AppConfig) 
     Ok(())
 }
 
-async fn liquidate_position(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn liquidate_position(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Liquidate Position");
 
     let wallet = Input::get_uuid("Liquidator wallet ID")?;
@@ -533,7 +589,7 @@ async fn liquidate_position(app_config: &cradle_back_end::utils::app_config::App
     let amount = Input::get_i64("Liquidation amount")? as u64;
 
     let confirmed = cradle_back_end::cli_utils::confirm(
-        "Are you sure you want to liquidate this position? This is a significant operation."
+        "Are you sure you want to liquidate this position? This is a significant operation.",
     )?;
 
     if confirmed {
