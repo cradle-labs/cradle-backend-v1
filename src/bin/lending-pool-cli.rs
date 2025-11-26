@@ -1,8 +1,13 @@
 use anyhow::Result;
 use bigdecimal::BigDecimal;
 use colored::Colorize;
+use cradle_back_end::collect_input;
+use cradle_back_end::lending_pool::operations::{
+    CreateLendingPoolArgs, CreateNewYieldAsset, YieldAsset, create_lending_pool,
+};
 use std::io::Write;
 use std::str::FromStr;
+use uuid::Uuid;
 
 use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
 use cradle_back_end::cli_helper::{call_action_router, execute_with_retry, initialize_app_config};
@@ -12,7 +17,6 @@ use cradle_back_end::cli_utils::{
     menu::Operation,
     print_info, print_success,
 };
-use cradle_back_end::lending_pool::db_types::CreateLendingPoolRecord;
 use cradle_back_end::lending_pool::processor_enums::{
     GetLendingPoolInput, LendingPoolFunctionsInput, LiquidatePositionInputArgs, RepayLoanInputArgs,
     SupplyLiquidityInputArgs, TakeLoanInputArgs, WithdrawLiquidityInputArgs,
@@ -196,72 +200,56 @@ async fn get_pool_by_address(
 }
 
 async fn create_pool(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+    use dialoguer::{Input, Select};
     print_header("Create Pool");
+    let mut action_wallet = app_config.wallet.clone();
 
-    let pool_address = Input::get_string("Pool address")?;
-    let contract_id = Input::get_string("Pool contract ID")?;
-    let reserve_asset = Input::get_uuid("Reserve asset ID")?;
-    let yield_asset = Input::get_uuid("Yiled Asset ID")?;
+    let reserve_asset = collect_input!("Reserve Asset", Uuid);
+    let ltv = collect_input!("LTV", 7500, u64);
+    let opt_util = collect_input!("Optimial Utilization", 8000, u64);
+    let base_rate = collect_input!("Base Rate", 100, u64);
+    let slope_1 = collect_input!("Slope 1", 4000, u64);
+    let slope_2 = collect_input!("Slope 2", 6000, u64);
+    let liquidation_threshold = collect_input!("Liquidation threshold", 8500, u64);
+    let liquidation_discount = collect_input!("Liquidation Discount", 500, u64);
+    let reserve_factor = collect_input!("Reserve Factor", 1000, u64);
+    let name = collect_input!("Name ::", String);
 
-    let ltv_str = Input::get_string("Loan to value ratio")?;
-    let ltv = BigDecimal::from_str(&ltv_str)?;
+    let yield_asset = {
+        let name = collect_input!("Name of Yield Asset", String);
+        let symbol = collect_input!("Asset Symbol ", String);
+        let decimals = collect_input!("Decimals", 8, i32);
+        let icon = collect_input!("Icon", "any".to_string(), String);
 
-    let base_rate_str = Input::get_string("Base rate")?;
-    let base_rate = BigDecimal::from_str(&base_rate_str)?;
+        YieldAsset::New(CreateNewYieldAsset {
+            name,
+            symbol,
+            decimals: Some(decimals),
+            icon: Some(icon),
+        })
+    };
 
-    let slope1_str = Input::get_string("Slope1")?;
-    let slope1 = BigDecimal::from_str(&slope1_str)?;
-
-    let slope2_str = Input::get_string("Slope2")?;
-    let slope2 = BigDecimal::from_str(&slope2_str)?;
-
-    let liquidation_threshold_str = Input::get_string("Liquidation threshold")?;
-    let liquidation_threshold = BigDecimal::from_str(&liquidation_threshold_str)?;
-
-    let liquidation_discount_str = Input::get_string("Liquidation discount")?;
-    let liquidation_discount = BigDecimal::from_str(&liquidation_discount_str)?;
-
-    let reserve_factor_str = Input::get_string("Reserve factor")?;
-    let reserve_factor = BigDecimal::from_str(&reserve_factor_str)?;
-
-    let name = Input::get_string("Pool name (optional)")?;
-    let title = Input::get_string("Pool title (optional - press Enter to skip)")?;
-    let description = Input::get_string("Pool description (optional - press Enter to skip)")?;
-
-    execute_with_retry(
-        || async {
-            let create_input = CreateLendingPoolRecord {
-                pool_address: pool_address.clone(),
-                pool_contract_id: contract_id.clone(),
-                reserve_asset,
-                loan_to_value: ltv.clone(),
-                base_rate: base_rate.clone(),
-                slope1: slope1.clone(),
-                slope2: slope2.clone(),
-                liquidation_threshold: liquidation_threshold.clone(),
-                liquidation_discount: liquidation_discount.clone(),
-                reserve_factor: reserve_factor.clone(),
-                name: if name.is_empty() { None } else { Some(name.clone()) },
-                title: if title.is_empty() { None } else { Some(title.clone()) },
-                description: if description.is_empty() { None } else { Some(description.clone()) },
-                yield_asset
-            };
-
-            let input = LendingPoolFunctionsInput::CreateLendingPool(create_input);
-            let router_input = ActionRouterInput::Pool(input);
-
-            match call_action_router(router_input, app_config.clone()).await? {
-                ActionRouterOutput::Pool(cradle_back_end::lending_pool::processor_enums::LendingPoolFunctionsOutput::CreateLendingPool(pool_id)) => {
-                    println!("Created pool with ID: {}", pool_id);
-                    print_success("Pool created successfully");
-                    Ok(())
-                }
-                _ => Err(anyhow::anyhow!("Unexpected output type")),
-            }
+    let mut conn = app_config.pool.get()?;
+    let pool = create_lending_pool(
+        &mut conn,
+        &mut action_wallet,
+        CreateLendingPoolArgs {
+            reserve_asset,
+            ltv,
+            optimal_utilization: opt_util,
+            base_rate,
+            slope_1,
+            slope_2,
+            liquidation_threshold,
+            liquidation_discount,
+            reserve_factor,
+            name,
         },
-        "create_pool",
+        yield_asset,
     )
     .await?;
+
+    println!("Pool Successfully Created {}", pool);
 
     Ok(())
 }

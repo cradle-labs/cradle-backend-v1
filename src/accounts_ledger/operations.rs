@@ -95,12 +95,12 @@ pub fn record_transaction(
         RecordTransactionAssets::LiquidateLoan(v) => v.collateral,
     };
 
-    let mut amount = BigDecimal::from(amount.unwrap_or(0));
+    let amount = BigDecimal::from(amount.unwrap_or(0));
 
     let mut ledger_entry = CreateLedgerEntry {
         from_address: from_address.clone(),
         to_address: to_address.clone(),
-        transaction: None,
+        transaction: tx_id,
         asset,
         transaction_type: transaction_type.unwrap_or(AccountLedgerTransactionType::Lock),
         amount: amount.clone(),

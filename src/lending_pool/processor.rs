@@ -1,4 +1,6 @@
 use crate::accounts::db_types::CradleWalletAccountRecord;
+use crate::accounts::operations::{associate_token, kyc_token};
+use crate::accounts::processor_enums::{AssociateTokenToWalletInputArgs, GrantKYCInputArgs};
 use crate::accounts_ledger::operations::{
     BorrowAssets, Deposit, LiquidateLoan, RecordTransactionAssets, Withdraw, record_transaction,
 };
@@ -8,6 +10,7 @@ use crate::lending_pool::db_types::{
     CreateLendingPoolSnapShotRecord, CreateLoanRecord, CreatePoolTransactionRecord,
     LendingPoolRecord, LendingPoolSnapShotRecord, LoanStatus, PoolTransactionType,
 };
+use crate::lending_pool::operations::{UpdateRepaymentArgs, update_repayment};
 use crate::lending_pool::processor_enums::{
     GetLendingPoolInput, LendingPoolFunctionsInput, LendingPoolFunctionsOutput,
 };
@@ -113,6 +116,27 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 let wallet = cradlewalletaccounts::dsl::cradlewalletaccounts
                     .filter(cradlewalletaccounts::dsl::id.eq(args.wallet))
                     .get_result::<CradleWalletAccountRecord>(app_conn)?;
+
+                // auto associate and grant kyc to account for user
+                associate_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    AssociateTokenToWalletInputArgs {
+                        wallet_id: wallet.id,
+                        token: pool.yield_asset,
+                    },
+                )
+                .await?;
+
+                kyc_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    GrantKYCInputArgs {
+                        wallet_id: wallet.id,
+                        token: pool.yield_asset,
+                    },
+                )
+                .await?;
 
                 let result = app_config
                     .wallet
@@ -242,6 +266,27 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     .filter(id.eq(args.collateral))
                     .get_result::<AssetBookRecord>(app_conn)?;
 
+                // auto associate and grant kyc to account for user
+                associate_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    AssociateTokenToWalletInputArgs {
+                        wallet_id: wallet.id,
+                        token: pool.reserve_asset,
+                    },
+                )
+                .await?;
+
+                kyc_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    GrantKYCInputArgs {
+                        wallet_id: wallet.id,
+                        token: pool.reserve_asset,
+                    },
+                )
+                .await?;
+
                 let res = app_config
                     .wallet
                     .execute(ContractCallInput::AssetLendingPool(
@@ -284,6 +329,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                         borrow_index: BigDecimal::from(data.borrow_index),
                         principal_amount: BigDecimal::from(data.borrowed_amount),
                         status: LoanStatus::Active,
+                        collateral_asset: args.collateral,
                     };
 
                     let loan_id = diesel::insert_into(crate::schema::loans::table)
@@ -311,7 +357,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 let pool = LendingPoolRecord::get(app_conn, loan.pool)?;
 
                 let collateral_record = asset_book
-                    .filter(crate::schema::asset_book::dsl::id.eq(loan.pool))
+                    .filter(crate::schema::asset_book::dsl::id.eq(loan.collateral_asset))
                     .get_result::<AssetBookRecord>(app_conn)?;
 
                 let result = app_config
@@ -347,13 +393,23 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     let repayment = crate::lending_pool::db_types::CreateLoanRepaymentRecord {
                         loan_id: loan.id,
                         repayment_amount: BigDecimal::from(args.amount),
-                        transaction: output.transaction_id,
+                        transaction: output.transaction_id.clone(),
                     };
 
                     let res = diesel::insert_into(crate::schema::loanrepayments::table)
                         .values(&repayment)
                         .returning(crate::schema::loanrepayments::dsl::id)
                         .get_result::<Uuid>(app_conn)?;
+
+                    update_repayment(
+                        app_conn,
+                        UpdateRepaymentArgs {
+                            loan_id: loan.id,
+                            amount: args.amount,
+                            transaction: output.transaction_id.clone(),
+                        },
+                    )
+                    .await?;
 
                     return Ok(LendingPoolFunctionsOutput::RepayBorrow());
                 }
@@ -380,8 +436,29 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 let pool = LendingPoolRecord::get(app_conn, loan.pool)?;
 
                 let collateral_record = asset_book
-                    .filter(crate::schema::asset_book::dsl::id.eq(loan.pool))
+                    .filter(crate::schema::asset_book::dsl::id.eq(loan.collateral_asset))
                     .get_result::<AssetBookRecord>(app_conn)?;
+
+                // associate collateral asset and kyc before giving the user the asset
+                associate_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    AssociateTokenToWalletInputArgs {
+                        wallet_id: args.wallet,
+                        token: loan.collateral_asset,
+                    },
+                )
+                .await?;
+
+                kyc_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    GrantKYCInputArgs {
+                        wallet_id: args.wallet,
+                        token: loan.collateral_asset,
+                    },
+                )
+                .await?;
 
                 let result = app_config
                     .wallet

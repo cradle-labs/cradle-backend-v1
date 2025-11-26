@@ -206,6 +206,9 @@ diesel::table! {
         created_at -> Timestamp,
         updated_at -> Timestamp,
         yield_asset -> Uuid,
+        treasury_wallet -> Uuid,
+        reserve_wallet -> Uuid,
+        pool_account_id -> Uuid,
     }
 }
 
@@ -258,6 +261,7 @@ diesel::table! {
         created_at -> Timestamp,
         status -> LoanStatus,
         transaction -> Nullable<Text>,
+        collateral_asset -> Uuid,
     }
 }
 
@@ -373,10 +377,12 @@ diesel::joinable!(cradlelistedcompanies -> cradlewalletaccounts (beneficiary_wal
 diesel::joinable!(cradlenativelistings -> cradlelistedcompanies (company));
 diesel::joinable!(cradlenativelistings -> cradlewalletaccounts (treasury));
 diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
+diesel::joinable!(lendingpool -> cradleaccounts (pool_account_id));
 diesel::joinable!(lendingpoolsnapshots -> lendingpool (lending_pool_id));
 diesel::joinable!(loanliquidations -> cradlewalletaccounts (liquidator_wallet_id));
 diesel::joinable!(loanliquidations -> loans (loan_id));
 diesel::joinable!(loanrepayments -> loans (loan_id));
+diesel::joinable!(loans -> asset_book (collateral_asset));
 diesel::joinable!(loans -> cradleaccounts (account_id));
 diesel::joinable!(loans -> cradlewalletaccounts (wallet_id));
 diesel::joinable!(loans -> lendingpool (pool));

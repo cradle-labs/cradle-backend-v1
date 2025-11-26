@@ -3,9 +3,12 @@ use crate::accounts::config::AccountProcessorConfig;
 use crate::accounts::db_types::{
     AccountAssetBookRecord, CradleAccountRecord, CradleWalletAccountRecord, CreateAccountAssetBook,
 };
-use crate::accounts::operations::{create_account_wallet, delete_account};
+use crate::accounts::operations::{
+    associate_token, create_account_wallet, delete_account, kyc_token,
+};
 use crate::action_router::{ActionRouterInput, ActionRouterOutput};
 use crate::asset_book::db_types::AssetBookRecord;
+use crate::extract_option;
 use crate::schema::asset_book::dsl as AssetBookDsl;
 use crate::schema::cradleaccounts as CradleAccounts;
 use crate::schema::cradlewalletaccounts as CradleWalletAccounts;
@@ -298,83 +301,43 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                 Ok(AccountsProcessorOutput::DeleteWallet)
             }
             AccountsProcessorInput::AssociateTokenToWallet(args) => {
-                let wallet_req = ActionRouterInput::Accounts(AccountsProcessorInput::GetWallet(
-                    GetWalletInputArgs::ById(args.wallet_id),
-                ));
+                let app_conn = extract_option!(conn)?;
 
-                let token = AssetBookDsl::asset_book
-                    .filter(AssetBookDsl::id.eq(args.token))
-                    .get_result::<AssetBookRecord>(
-                        conn.ok_or_else(|| anyhow!("Unable to get connection"))?,
-                    )?;
-
-                let res = Box::pin(wallet_req.process(app_config.clone())).await?;
-
-                if let ActionRouterOutput::Accounts(AccountsProcessorOutput::GetWallet(wallet)) =
-                    res
+                match associate_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    AssociateTokenToWalletInputArgs {
+                        wallet_id: args.wallet_id,
+                        token: args.token,
+                    },
+                )
+                .await
                 {
-                    let res = local_config
-                        .wallet
-                        .execute(ContractCallInput::CradleAccount(
-                            CradleAccountFunctionInput::AssociateToken(AssociateTokenArgs {
-                                account_contract_id: wallet.contract_id,
-                                token: token.token,
-                            }),
-                        ))
-                        .await?;
-
-                    return if let ContractCallOutput::CradleAccount(
-                        CradleAccountFunctionOutput::AssociateToken(out),
-                    ) = res
-                    {
-                        println!("Out :: {:?}", out.transaction_id);
-                        // TODO: record token somewhere
-
-                        Ok(AccountsProcessorOutput::AssociateTokenToWallet)
-                    } else {
-                        Err(anyhow!("Unable to associate account"))
-                    };
-                } else {
-                    return Err(anyhow!("Unable to find wallet"));
+                    Ok(_) => Ok(AccountsProcessorOutput::AssociateTokenToWallet),
+                    Err(e) => {
+                        eprintln!("Failed to grant kyc {:?}", e);
+                        Err(anyhow!("Failed to grant kyc"))
+                    }
                 }
             }
             AccountsProcessorInput::GrantKYC(args) => {
-                let wallet_req = ActionRouterInput::Accounts(AccountsProcessorInput::GetWallet(
-                    GetWalletInputArgs::ById(args.wallet_id),
-                ));
+                let app_conn = extract_option!(conn)?;
 
-                let app_conn = conn.ok_or_else(|| anyhow!("Unable to get connection"))?;
-
-                let token_record = AssetBookDsl::asset_book
-                    .filter(AssetBookDsl::id.eq(args.token))
-                    .get_result::<AssetBookRecord>(app_conn)?;
-
-                let res = Box::pin(wallet_req.process(app_config.clone())).await?;
-
-                if let ActionRouterOutput::Accounts(AccountsProcessorOutput::GetWallet(wallet)) =
-                    res
+                match kyc_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    GrantKYCInputArgs {
+                        wallet_id: args.wallet_id,
+                        token: args.token,
+                    },
+                )
+                .await
                 {
-                    let res = app_config
-                        .wallet
-                        .execute(ContractCallInput::AssetManager(
-                            AssetManagerFunctionInput::GrantKYC(
-                                token_record.asset_manager,
-                                wallet.address.clone(),
-                            ),
-                        ))
-                        .await?;
-
-                    if let ContractCallOutput::AssetManager(AssetManagerFunctionOutput::GrantKYC(
-                        output,
-                    )) = res
-                    {
-                        println!("Grant kyc:: {}", output.transaction_id);
-                        Ok(AccountsProcessorOutput::GrantKYC)
-                    } else {
-                        Err(anyhow!("Unable to grant kyc"))
+                    Ok(_) => Ok(AccountsProcessorOutput::GrantKYC),
+                    Err(e) => {
+                        eprintln!("Failed to grant kyc {:?}", e);
+                        Err(anyhow!("Failed to grant kyc"))
                     }
-                } else {
-                    return Err(anyhow!("Unable to find wallet"));
                 }
             }
             AccountsProcessorInput::WithdrawTokens(args) => {

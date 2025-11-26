@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::{
     accounts::{
         self,
@@ -13,18 +15,28 @@ use crate::{
         db_types::AccountLedgerTransactionType,
         operations::{ListingPurchase, ListingSell, RecordTransactionAssets, record_transaction},
     },
-    asset_book::{db_types::AssetBookRecord, processor_enums::CreateNewAssetInputArgs},
+    asset_book::{
+        db_types::AssetBookRecord,
+        operations::{airdrop_asset, mint_asset},
+        processor_enums::CreateNewAssetInputArgs,
+    },
+    big_to_u64, extract_option,
     listing::db_types::{
         CompanyRow, CradleNativeListingRow, CreateCompany, CreateCraldeNativeListing, ListingStatus,
     },
-    schema::cradlenativelistings,
+    schema::cradlenativelistings::{self, shadow_asset},
+    utils::commons::get_system_addresses,
 };
 use accounts::operations::*;
 use anyhow::{Result, anyhow};
 use bigdecimal::{BigDecimal, ToPrimitive};
 use contract_integrator::{
+    hedera::ContractId,
+    id_to_address,
     utils::functions::{
-        ContractCallInput, ContractCallOutput, WithContractId, commons,
+        ContractCallInput, ContractCallOutput, WithContractId,
+        asset_manager::{AssetManagerFunctionInput, MintArgs},
+        commons,
         cradle_native_listing::{
             CradleNativeListingFunctionsInput, CradleNativeListingFunctionsOutput, ListingStats,
             PurchaseInputArgs, ReturnAssetInputArgs, WithdrawToBeneficiaryInputArgs,
@@ -193,7 +205,7 @@ pub async fn create_listing(
         use crate::schema::asset_book::dsl::*;
 
         asset_book
-            .filter(id.eq(input.purchase_asset.clone()))
+            .filter(id.eq(input.purchase_asset))
             .get_result::<AssetBookRecord>(conn)?
     };
 
@@ -220,7 +232,7 @@ pub async fn create_listing(
 
         // associate
         // associate to purchase asset
-        let _ = associate_token(
+        associate_token(
             conn,
             wallet,
             AssociateTokenToWalletInputArgs {
@@ -230,7 +242,7 @@ pub async fn create_listing(
         )
         .await?;
         // associate to listing asset
-        let _ = associate_token(
+        associate_token(
             conn,
             wallet,
             AssociateTokenToWalletInputArgs {
@@ -239,11 +251,20 @@ pub async fn create_listing(
             },
         )
         .await?;
-        // will never hold shadow asset
+        // associate shadow asset
+        associate_token(
+            conn,
+            wallet,
+            AssociateTokenToWalletInputArgs {
+                wallet_id: tw.id,
+                token: shadow_asset_value.id,
+            },
+        )
+        .await?;
 
         // kyc
         // kyc to purchase asset
-        let _ = kyc_token(
+        kyc_token(
             conn,
             wallet,
             GrantKYCInputArgs {
@@ -254,7 +275,7 @@ pub async fn create_listing(
         .await?;
 
         // kyc to listing asset
-        let _ = kyc_token(
+        kyc_token(
             conn,
             wallet,
             GrantKYCInputArgs {
@@ -263,31 +284,72 @@ pub async fn create_listing(
             },
         )
         .await?;
-        // will never hold shadow asset
+        // kyc shadow asset
+        kyc_token(
+            conn,
+            wallet,
+            GrantKYCInputArgs {
+                wallet_id: tw.id,
+                token: shadow_asset_value.id,
+            },
+        )
+        .await?;
 
         tw
     };
 
-    // create da listing
+    // mint and airdrop initial tokens to the treasury
+    mint_asset(
+        conn,
+        wallet,
+        asset.id,
+        big_to_u64!(input.max_supply.clone())?,
+    )
+    .await?;
+
+    mint_asset(
+        conn,
+        wallet,
+        shadow_asset_value.id,
+        big_to_u64!(input.max_supply.clone())?,
+    )
+    .await?;
+
+    airdrop_asset(
+        conn,
+        wallet,
+        asset.id,
+        treasury.id,
+        big_to_u64!(input.max_supply.clone())?,
+    )
+    .await?;
+    airdrop_asset(
+        conn,
+        wallet,
+        shadow_asset_value.id,
+        treasury.id,
+        big_to_u64!(input.max_supply.clone())?,
+    )
+    .await?;
 
     let res = wallet
         .execute(ContractCallInput::CradleListingFactory(
             CradleListingFactoryFunctionsInput::CreateListing(CreateListing {
-                fee_collector_address: "".to_string(),
+                fee_collector_address: get_system_addresses().fee_collector,
                 reserve_account: treasury.address,
                 max_supply: input
                     .max_supply
                     .clone()
                     .to_u64()
                     .ok_or_else(|| anyhow!("unable to convert"))?,
-                listing_asset: asset.asset_manager,
+                listing_asset: asset.token,
                 purchase_asset: purchase_asset.token,
                 purchase_price: input
                     .purchase_price
                     .to_u64()
                     .ok_or_else(|| anyhow!("Unable to unwrap"))?,
                 beneficiary_address: beneficiary_wallet.address,
-                shadow_asset: shadow_asset_value.asset_manager,
+                shadow_asset: shadow_asset_value.token,
             }),
         ))
         .await?;
@@ -296,11 +358,12 @@ pub async fn create_listing(
         let address = match res {
             ContractCallOutput::CradleListingFactory(
                 CradleListingFactoryFunctionsOutput::CreateListing(r),
-            ) => r
-                .output
-                .ok_or_else(|| anyhow!("Failed to retrieve contract address"))?,
+            ) => extract_option!(r.output)?,
             _ => return Err(anyhow!("Failed to create listing successfully")),
         };
+
+        // grant acl level 1 to the listing so that it can call accounts
+        grant_access_to_level(wallet, address.clone(), 1).await?;
 
         let id = commons::get_contract_id_from_evm_address(address.as_str()).await?;
 
@@ -341,7 +404,7 @@ pub async fn purchase(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     wallet: &mut ActionWallet,
     input: PurchaseListingAssetInputArgs,
-) -> Result<()> {
+) -> Result<Uuid> {
     let listing = {
         use crate::schema::cradlenativelistings::dsl::*;
 
@@ -358,7 +421,7 @@ pub async fn purchase(
             .get_result::<CradleWalletAccountRecord>(conn)?
     };
 
-    let _ = associate_token(
+    associate_token(
         conn,
         wallet,
         AssociateTokenToWalletInputArgs {
@@ -367,7 +430,7 @@ pub async fn purchase(
         },
     )
     .await?;
-    let _ = associate_token(
+    associate_token(
         conn,
         wallet,
         AssociateTokenToWalletInputArgs {
@@ -377,7 +440,7 @@ pub async fn purchase(
     )
     .await?;
 
-    let _ = kyc_token(
+    kyc_token(
         conn,
         wallet,
         GrantKYCInputArgs {
@@ -386,7 +449,7 @@ pub async fn purchase(
         },
     )
     .await?;
-    let _ = kyc_token(
+    kyc_token(
         conn,
         wallet,
         GrantKYCInputArgs {
@@ -412,8 +475,9 @@ pub async fn purchase(
 
     let transaction = wallet.execute(transaction_input).await?;
 
-    // TODO: record balance updates to accounts ledger
-    record_transaction(
+    println!("Transaction :: {:?}", transaction.clone());
+
+    let uuid = record_transaction(
         conn,
         Some(account_wallet.address),
         None,
@@ -428,7 +492,7 @@ pub async fn purchase(
         None,
     )?;
 
-    Ok(())
+    Ok(uuid)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -442,7 +506,7 @@ pub async fn return_asset(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     wallet: &mut ActionWallet,
     input: ReturnAssetListingInputArgs,
-) -> Result<()> {
+) -> Result<Uuid> {
     let listing = {
         use crate::schema::cradlenativelistings::dsl::*;
 
@@ -512,7 +576,7 @@ pub async fn return_asset(
 
     let transaction = wallet.execute(transaction_input).await?;
 
-    record_transaction(
+    let tx_id = record_transaction(
         conn,
         Some(account_wallet.address),
         None,
@@ -527,7 +591,7 @@ pub async fn return_asset(
         None,
     )?;
 
-    Ok(())
+    Ok(tx_id)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -540,7 +604,7 @@ pub async fn withdraw_to_beneficiary(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     wallet: &mut ActionWallet,
     input: WithdrawToBeneficiaryInputArgsBody,
-) -> Result<()> {
+) -> Result<Uuid> {
     let listing = {
         use crate::schema::cradlenativelistings::dsl::*;
 
@@ -599,7 +663,7 @@ pub async fn withdraw_to_beneficiary(
 
     let transaction = wallet.execute(transaction_input).await?;
 
-    record_transaction(
+    let tx = record_transaction(
         conn,
         None,
         Some(company_wallet.address),
@@ -611,7 +675,7 @@ pub async fn withdraw_to_beneficiary(
         None,
     )?;
 
-    Ok(())
+    Ok(tx)
 }
 
 pub async fn get_listing_stats(
@@ -663,6 +727,48 @@ pub async fn get_purchase_fee(
     match transaction {
         ContractCallOutput::CradleNativeListing(CradleNativeListingFunctionsOutput::GetFee(o)) => {
             o.output.ok_or_else(|| anyhow!("Unable to retrieve stats"))
+        }
+        _ => Err(anyhow!("Unable to get listing stats")),
+    }
+}
+
+pub async fn update_listing_status(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    wallet: &mut ActionWallet,
+    listing_id: Uuid,
+    new_status: ListingStatus,
+) -> Result<()> {
+    use contract_integrator::utils::functions::cradle_native_listing::ListingStatus as CListingStatus;
+
+    let listing = get_listing(conn, listing_id).await?;
+    let transaction_input = ContractCallInput::CradleNativeListing(
+        CradleNativeListingFunctionsInput::UpdateListingStatus(WithContractId {
+            contract_id: listing.listing_contract_id,
+            rest: Some(match new_status.clone() {
+                ListingStatus::Pending => CListingStatus::Pending,
+                ListingStatus::Open => CListingStatus::Open,
+                ListingStatus::Closed => CListingStatus::Closed,
+                ListingStatus::Paused => CListingStatus::Paused,
+                _ => CListingStatus::Cancelled,
+            }),
+        }),
+    );
+
+    let transaction = wallet.execute(transaction_input).await?;
+
+    match transaction {
+        ContractCallOutput::CradleNativeListing(
+            CradleNativeListingFunctionsOutput::UpdateListingStatus(o),
+        ) => {
+            use crate::schema::cradlenativelistings::dsl::*;
+            use crate::schema::cradlenativelistings::table as datatable;
+            diesel::update(datatable)
+                .filter(id.eq(listing_id))
+                .set((status.eq(new_status)))
+                .execute(conn)?;
+
+            println!("Update complete");
+            Ok(())
         }
         _ => Err(anyhow!("Unable to get listing stats")),
     }

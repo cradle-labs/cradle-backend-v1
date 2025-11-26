@@ -2,7 +2,14 @@ use anyhow::{Result, anyhow};
 use contract_integrator::{
     utils::functions::{
         ContractCallInput, ContractCallOutput,
-        asset_issuer::{AssetIssuerFunctionsInput, AssetIssuerFunctionsOutput, CreateAssetArgs},
+        asset_factory::{AssetFactoryFunctionInput, AssetFactoryFunctionOutput},
+        asset_issuer::{
+            AssetIssuerFunctionsInput, AssetIssuerFunctionsOutput, CreateAssetArgs,
+            CreateAssetResult,
+        },
+        asset_manager::{
+            AirdropArgs, AssetManagerFunctionInput, AssetManagerFunctionOutput, MintArgs,
+        },
         commons::get_contract_id_from_evm_address,
     },
     wallet::wallet::ActionWallet,
@@ -14,9 +21,14 @@ use diesel::{
 };
 use uuid::Uuid;
 
-use crate::asset_book::{
-    db_types::{AssetType, CreateAssetOnBook},
-    processor_enums::CreateNewAssetInputArgs,
+use crate::{
+    accounts::db_types::{AccountAssetBookRecord, CradleWalletAccountRecord},
+    api::handlers::assets::get_asset_by_id,
+    asset_book::{
+        db_types::{AssetBookRecord, AssetType, CreateAssetOnBook},
+        processor_enums::CreateNewAssetInputArgs,
+    },
+    extract_option,
 };
 
 pub async fn create_asset(
@@ -76,7 +88,29 @@ pub async fn create_asset(
             }
         }
         _ => {
-            unimplemented!("asset type not supported")
+            let input = ContractCallInput::AssetFactory(AssetFactoryFunctionInput::CreateAsset(
+                contract_integrator::utils::functions::asset_factory::CreateAssetArgs {
+                    name: args.name.clone(),
+                    symbol: args.symbol.clone(),
+                    acl_contract: contract_ids
+                        .access_controller_contract_id
+                        .to_solidity_address()?,
+                    allow_list: 1,
+                },
+            ));
+
+            let output = wallet.execute(input).await?;
+
+            match output {
+                ContractCallOutput::AssetFactory(AssetFactoryFunctionOutput::CreateAsset(res)) => {
+                    let o = extract_option!(res.output)?;
+                    CreateAssetResult {
+                        asset_manager: o.asset_manager,
+                        token: o.token,
+                    }
+                }
+                _ => return Err(anyhow!("Failed to retreive asset result")),
+            }
         }
     };
 
@@ -101,4 +135,83 @@ pub async fn create_asset(
         .get_result::<Uuid>(conn)?;
 
     Ok(asset_id)
+}
+
+pub async fn get_asset(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    asset_id: Uuid,
+) -> Result<AssetBookRecord> {
+    use crate::schema::asset_book::dsl::*;
+
+    let record = asset_book
+        .filter(id.eq(asset_id))
+        .get_result::<AssetBookRecord>(conn)?;
+
+    Ok(record)
+}
+
+pub async fn get_wallet(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    wallet_id: Uuid,
+) -> Result<CradleWalletAccountRecord> {
+    use crate::schema::cradlewalletaccounts::dsl::*;
+
+    let record = cradlewalletaccounts
+        .filter(id.eq(wallet_id))
+        .get_result::<CradleWalletAccountRecord>(conn)?;
+
+    Ok(record)
+}
+
+pub async fn mint_asset(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    wallet: &mut ActionWallet,
+    asset_id: Uuid,
+    amount: u64,
+) -> Result<()> {
+    let asset = get_asset(conn, asset_id).await?;
+
+    let mint_req_input =
+        ContractCallInput::AssetManager(AssetManagerFunctionInput::Mint(MintArgs {
+            asset_contract: asset.asset_manager,
+            amount,
+        }));
+
+    let mint_res = wallet.execute(mint_req_input).await?;
+
+    match mint_res {
+        ContractCallOutput::AssetManager(AssetManagerFunctionOutput::Mint(o)) => {
+            println!("Transaction successful :: {:?}", o.transaction_id); // TODO: save minting event
+            Ok(())
+        }
+        _ => Err(anyhow!("Failed to mint")),
+    }
+}
+
+pub async fn airdrop_asset(
+    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    wallet: &mut ActionWallet,
+    asset_id: Uuid,
+    wallet_id: Uuid,
+    amount: u64,
+) -> Result<()> {
+    let asset = get_asset(conn, asset_id).await?;
+    let account_wallet = get_wallet(conn, wallet_id).await?;
+
+    let airdrop_req =
+        ContractCallInput::AssetManager(AssetManagerFunctionInput::Airdrop(AirdropArgs {
+            asset_contract: asset.asset_manager,
+            target: account_wallet.address,
+            amount,
+        }));
+
+    let res = wallet.execute(airdrop_req).await?;
+
+    match res {
+        ContractCallOutput::AssetManager(AssetManagerFunctionOutput::Airdrop(o)) => {
+            println!("Transaction successful :: {:?}", o.transaction_id);
+            Ok(()) // TODO: record airdrops to ledger
+        }
+        _ => Err(anyhow!("Failed to airdrop")),
+    }
 }

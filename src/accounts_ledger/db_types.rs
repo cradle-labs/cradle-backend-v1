@@ -16,6 +16,8 @@ use uuid::Uuid;
 #[serde(rename_all = "lowercase")]
 pub enum AccountLedgerTransactionType {
     Lock,
+    #[serde(rename = "unlock")]
+    #[db_rename = "unlock"]
     UnLock,
     Lend,
     Borrow,

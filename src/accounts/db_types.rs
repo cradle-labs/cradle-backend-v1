@@ -1,42 +1,40 @@
+use crate::schema::cradleaccounts as CradleAccountsTable;
+use crate::schema::cradlewalletaccounts as CradleWalletAccountsTable;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::schema::cradleaccounts as CradleAccountsTable;
-use crate::schema::cradlewalletaccounts as CradleWalletAccountsTable;
 
 #[derive(DbEnum, Deserialize, Serialize, Debug, Clone)]
-#[ExistingTypePath="crate::schema::sql_types::Cradleaccounttype"]
+#[ExistingTypePath = "crate::schema::sql_types::Cradleaccounttype"]
 #[serde(rename_all = "lowercase")]
 pub enum CradleAccountType {
     Retail,
-    Institutional
+    Institutional,
+    System,
 }
 
-
 #[derive(DbEnum, Deserialize, Serialize, Debug, Clone)]
-#[ExistingTypePath="crate::schema::sql_types::Cradlewalletstatus"]
+#[ExistingTypePath = "crate::schema::sql_types::Cradlewalletstatus"]
 #[serde(rename_all = "lowercase")]
 pub enum CradleWalletStatus {
     Active,
     #[serde(rename = "inactive")]
     Inactive,
-    Suspended
+    Suspended,
 }
 
-
 #[derive(DbEnum, Deserialize, Serialize, Debug, Clone)]
-#[ExistingTypePath="crate::schema::sql_types::Cradleaccountstatus"]
+#[ExistingTypePath = "crate::schema::sql_types::Cradleaccountstatus"]
 #[serde(rename_all = "lowercase")]
 pub enum CradleAccountStatus {
-    #[serde(rename="unverified")]
+    #[serde(rename = "unverified")]
     Unverified,
     Verified,
     Suspended,
-    Closed
+    Closed,
 }
-
 
 #[derive(Serialize, Deserialize, Queryable, Debug, Clone, Identifiable, QueryableByName)]
 #[diesel(table_name = CradleAccountsTable)]
@@ -46,16 +44,15 @@ pub struct CradleAccountRecord {
     pub linked_account_id: String,
     pub created_at: NaiveDateTime,
     pub account_type: CradleAccountType,
-    pub status: CradleAccountStatus
+    pub status: CradleAccountStatus,
 }
-
 
 #[derive(Serialize, Deserialize, Insertable, Debug, Clone)]
 #[diesel(table_name = CradleAccountsTable)]
 pub struct CreateCradleAccount {
     pub linked_account_id: String,
     pub account_type: Option<CradleAccountType>,
-    pub status: Option<CradleAccountStatus>
+    pub status: Option<CradleAccountStatus>,
 }
 
 #[derive(Serialize, Deserialize, QueryableByName, Debug, Clone, Identifiable, Queryable)]
@@ -66,9 +63,8 @@ pub struct CradleWalletAccountRecord {
     pub address: String,
     pub contract_id: String,
     pub created_at: NaiveDateTime,
-    pub status: CradleWalletStatus
+    pub status: CradleWalletStatus,
 }
-
 
 #[derive(Serialize, Deserialize, Insertable, Clone, Debug)]
 #[diesel(table_name = CradleWalletAccountsTable)]
@@ -76,11 +72,10 @@ pub struct CreateCradleWalletAccount {
     pub cradle_account_id: Uuid,
     pub address: String,
     pub contract_id: String,
-    pub status: Option<CradleWalletStatus>
+    pub status: Option<CradleWalletStatus>,
 }
 
-
-#[derive(Serialize,Deserialize, Queryable, Identifiable, QueryableByName, Clone, Debug)]
+#[derive(Serialize, Deserialize, Queryable, Identifiable, QueryableByName, Clone, Debug)]
 #[diesel(table_name = crate::schema::accountassetbook)]
 pub struct AccountAssetBookRecord {
     pub id: Uuid,
@@ -93,7 +88,7 @@ pub struct AccountAssetBookRecord {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Serialize,Deserialize, Insertable, Clone, Debug)]
+#[derive(Serialize, Deserialize, Insertable, Clone, Debug)]
 #[diesel(table_name = crate::schema::accountassetbook)]
 pub struct CreateAccountAssetBook {
     pub asset_id: Uuid,
