@@ -1,3 +1,5 @@
+use crate::accounts::operations::{associate_token, kyc_token};
+use crate::accounts::processor_enums::{AssociateTokenToWalletInputArgs, GrantKYCInputArgs};
 use crate::order_book::config::OrderBookConfig;
 use crate::order_book::db_types::{FillMode, OrderBookRecord, OrderStatus};
 use crate::order_book::operations::{lock_asset, settle_order, update_order_status};
@@ -48,6 +50,27 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     args.ask_amount
                         .to_u64()
                         .ok_or_else(|| anyhow!("Failed to u64"))?,
+                )
+                .await?;
+
+                // asspciate ask asset and grant kyc
+                associate_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    AssociateTokenToWalletInputArgs {
+                        wallet_id: args.wallet,
+                        token: args.bid_asset,
+                    },
+                )
+                .await?;
+
+                kyc_token(
+                    app_conn,
+                    &mut app_config.wallet,
+                    GrantKYCInputArgs {
+                        wallet_id: args.wallet,
+                        token: args.bid_asset,
+                    },
                 )
                 .await?;
 

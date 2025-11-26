@@ -2,24 +2,34 @@ use anyhow::Result;
 use colored::Colorize;
 use std::io::Write;
 
+use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
 use cradle_back_end::asset_book::db_types::AssetType;
 use cradle_back_end::asset_book::processor_enums::{
-    AssetBookProcessorInput, CreateNewAssetInputArgs, CreateExistingAssetInputArgs, GetAssetInputArgs,
+    AssetBookProcessorInput, CreateExistingAssetInputArgs, CreateNewAssetInputArgs,
+    GetAssetInputArgs,
 };
+use cradle_back_end::cli_helper::{call_action_router, execute_with_retry, initialize_app_config};
 use cradle_back_end::cli_utils::{
-    menu::Operation,
+    formatting::{format_decimal, format_record, format_table, print_header, print_section},
     input::Input,
-    formatting::{format_table, format_record, print_header, print_section, format_decimal},
-    print_success, print_info,
+    menu::Operation,
+    print_info, print_success,
 };
-use cradle_back_end::cli_helper::{initialize_app_config, call_action_router, execute_with_retry};
-use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    eprintln!("{}", "╔═══════════════════════════════════════════════════════╗".bright_cyan());
-    eprintln!("{}", "║         Cradle Asset Book Management CLI              ║".bright_cyan());
-    eprintln!("{}", "╚═══════════════════════════════════════════════════════╝".bright_cyan());
+    eprintln!(
+        "{}",
+        "╔═══════════════════════════════════════════════════════╗".bright_cyan()
+    );
+    eprintln!(
+        "{}",
+        "║         Cradle Asset Book Management CLI              ║".bright_cyan()
+    );
+    eprintln!(
+        "{}",
+        "╚═══════════════════════════════════════════════════════╝".bright_cyan()
+    );
     eprintln!();
 
     // Initialize app config
@@ -52,8 +62,8 @@ async fn main() -> Result<()> {
                 Operation::Cancel => {
                     eprintln!("{}", "Goodbye!".bright_cyan());
                     break;
-                },
-                _=>unimplemented!()
+                }
+                _ => unimplemented!(),
             },
             Err(e) => {
                 eprintln!("{}", format!("Error: {}", e).red());
@@ -71,7 +81,15 @@ async fn list_assets(app_config: &cradle_back_end::utils::app_config::AppConfig)
     print_header("List Assets");
 
     // Get optional type filter
-    let type_opts = vec!["All", "Bridged", "Native", "Yield Bearing", "Chain Native", "StableCoin", "Volatile"];
+    let type_opts = vec![
+        "All",
+        "Bridged",
+        "Native",
+        "Yield Bearing",
+        "Chain Native",
+        "StableCoin",
+        "Volatile",
+    ];
     let selected_type = Input::select_from_list("Filter by type", type_opts)?;
 
     // TODO: Implement filtered list when bulk query available
@@ -152,7 +170,9 @@ async fn create_asset(app_config: &cradle_back_end::utils::app_config::AppConfig
     Ok(())
 }
 
-async fn create_new_asset(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn create_new_asset(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Create New Asset");
 
     let asset_name = Input::get_string("Asset name")?;
@@ -160,14 +180,21 @@ async fn create_new_asset(app_config: &cradle_back_end::utils::app_config::AppCo
     let decimals = Input::get_i64("Decimals (typically 8-18)")? as i32;
 
     // Select asset type
-    let type_options = vec!["Bridged", "Native", "Yield Bearing", "Chain Native", "StableCoin", "Volatile"];
+    let type_options = vec![
+        "Bridged",
+        "Native",
+        "Yield Bearing",
+        "Chain Native",
+        "StableCoin",
+        "Volatile",
+    ];
     let selected_type = Input::select_from_list("Asset type", type_options)?;
 
     let asset_type = match selected_type {
         0 => AssetType::Bridged,
         1 => AssetType::Native,
-        2 => AssetType::Yield_Bearing,
-        3 => AssetType::Chain_Native,
+        2 => AssetType::YieldBearing,
+        3 => AssetType::ChainNative,
         4 => AssetType::StableCoin,
         5 => AssetType::Volatile,
         _ => AssetType::Native,
@@ -203,7 +230,9 @@ async fn create_new_asset(app_config: &cradle_back_end::utils::app_config::AppCo
     Ok(())
 }
 
-async fn create_existing_asset(app_config: &cradle_back_end::utils::app_config::AppConfig) -> Result<()> {
+async fn create_existing_asset(
+    app_config: &cradle_back_end::utils::app_config::AppConfig,
+) -> Result<()> {
     print_header("Create Existing Asset");
 
     let token = Input::get_string("Token address")?;
@@ -213,14 +242,21 @@ async fn create_existing_asset(app_config: &cradle_back_end::utils::app_config::
     let decimals = Input::get_i64("Decimals")? as i32;
 
     // Select asset type
-    let type_options = vec!["Bridged", "Native", "Yield Bearing", "Chain Native", "StableCoin", "Volatile"];
+    let type_options = vec![
+        "Bridged",
+        "Native",
+        "Yield Bearing",
+        "Chain Native",
+        "StableCoin",
+        "Volatile",
+    ];
     let selected_type = Input::select_from_list("Asset type", type_options)?;
 
     let asset_type = match selected_type {
         0 => AssetType::Bridged,
         1 => AssetType::Native,
-        2 => AssetType::Yield_Bearing,
-        3 => AssetType::Chain_Native,
+        2 => AssetType::YieldBearing,
+        3 => AssetType::ChainNative,
         4 => AssetType::StableCoin,
         5 => AssetType::Volatile,
         _ => AssetType::Native,

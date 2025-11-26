@@ -1,20 +1,23 @@
 use crate::{
     accounts::{
         db_types::{
-            AccountAssetBookRecord, CradleWalletAccountRecord, CreateAccountAssetBook,
-            CreateCradleAccount, CreateCradleWalletAccount,
+            AccountAssetBookRecord, CradleWalletAccountRecord, CradleWalletStatus,
+            CreateAccountAssetBook, CreateCradleAccount, CreateCradleWalletAccount,
         },
         processor_enums::{
             AssociateTokenToWalletInputArgs, CreateCradleWalletInputArgs, DeleteAccountInputArgs,
             GrantKYCInputArgs,
         },
     },
+    address_to_id,
     asset_book::db_types::AssetBookRecord,
     schema::accountassetbook,
+    utils::commons::DbConn,
 };
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use contract_integrator::utils::functions::{
+    access_controller::{AccessControllerFunctionsInput, AccessControllerFunctionsOutput},
     asset_manager::AssetManagerFunctionOutput,
     cradle_account::{AssociateTokenArgs, CradleAccountFunctionInput, CradleAccountFunctionOutput},
     *,
@@ -42,6 +45,31 @@ pub async fn create_account(
         .returning(id)
         .get_result::<Uuid>(conn)?;
     Ok(new_id)
+}
+
+pub async fn register_account_wallet<'a>(
+    conn: DbConn<'a>,
+    owner: Uuid,
+    address: String,
+    status: Option<CradleWalletStatus>,
+) -> Result<Uuid> {
+    let contract_id_value = address_to_id!(address.as_str()).await?;
+
+    let input = CreateCradleWalletAccount {
+        contract_id: contract_id_value.to_string(),
+        address,
+        cradle_account_id: owner,
+        status,
+    };
+
+    use crate::schema::cradlewalletaccounts as cw;
+
+    let wallet_id = diesel::insert_into(cw::table)
+        .values(&input)
+        .returning(cw::dsl::id)
+        .get_result::<Uuid>(conn)?;
+
+    Ok(wallet_id)
 }
 
 pub async fn create_account_wallet(
@@ -305,5 +333,26 @@ pub async fn kyc_token(
                 .await
         }
         _ => return Err(anyhow!("Failed to associate token account")),
+    }
+}
+
+pub async fn grant_access_to_level(
+    wallet: &mut ActionWallet,
+    address: String,
+    level: u64,
+) -> Result<()> {
+    let req = ContractCallInput::AccessController(AccessControllerFunctionsInput::GrantAccess(
+        access_controller::AccessControllerArgs {
+            level,
+            account: address,
+        },
+    ));
+
+    match wallet.execute(req).await? {
+        ContractCallOutput::AccessController(AccessControllerFunctionsOutput::GrantAccess(o)) => {
+            println!("Successful :: {}", o.transaction_id);
+            Ok(())
+        }
+        _ => Err(anyhow!("Unable to grant access")),
     }
 }

@@ -31,6 +31,9 @@ pub struct LendingPoolRecord {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub yield_asset: Uuid,
+    pub treasury_wallet: Uuid,
+    pub reserve_wallet: Uuid,
+    pub pool_account_id: Uuid,
 }
 
 impl LendingPoolRecord {
@@ -65,6 +68,9 @@ pub struct CreateLendingPoolRecord {
     pub title: Option<String>,
     pub description: Option<String>,
     pub yield_asset: Uuid,
+    pub treasury_wallet: Uuid,
+    pub reserve_wallet: Uuid,
+    pub pool_account_id: Uuid,
 }
 
 #[derive(
@@ -117,6 +123,7 @@ pub struct LoanRecord {
     pub created_at: NaiveDateTime,
     pub status: LoanStatus,
     pub transaction: Option<String>,
+    pub collateral_asset: Uuid,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Insertable)]
@@ -129,6 +136,7 @@ pub struct CreateLoanRecord {
     pub principal_amount: BigDecimal,
     pub status: LoanStatus,
     pub transaction: Option<String>,
+    pub collateral_asset: Uuid,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Queryable, Identifiable, QueryableByName)]
