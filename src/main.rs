@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/pools/:id", get(get_pool))
         .route("/loans/:wallet", get(get_loans_handler))
         .route("/pool-stats/:id", get(get_pool_stats_handler))
-        .route("/loan-position/id", get(get_pool_borrow_positions))
+        .route("/loan-position/:loan_id", get(get_pool_borrow_positions))
         .route(
             "/pools/deposit/:pool_id/:wallet_id",
             get(get_pool_deposit_handler),
@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
             "/loans/repayments/:loan_id",
             get(get_loan_repayments_handler),
         )
-        .route("/loans/:loan_id", get(get_repaid_handler))
+        .route("/loan/:loan_id", get(get_repaid_handler))
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())
         .layer(auth_layer)
