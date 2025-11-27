@@ -10,18 +10,42 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 const DEDUCTIONS_QUERY: &str = r"
-with locked_amount as (
-    select sum(amount) as total from accountassetsledger where from_address = $1 and asset = $2 and transaction_type = 'lock'
-),
-unlocked as (
-    select sum(amount) as total from accountassetsledger where to_address = $1 and asset = $2 and transaction_type = 'unlock'
-    ),
-lent as (
-    select sum(amount) as total from accountassetsledger where from_address = $1 and asset = $2 and transaction_type = 'lend'
-)
-select coalesce(((l.total + le.total) - u.total), 0) as total from locked_amount as l
-cross join unlocked as u
-cross join lent as le;
+SELECT
+    COALESCE(
+        (
+            COALESCE(SUM(
+                CASE
+                    WHEN to_address   = $1
+                     AND asset        = $2
+                     AND transaction_type = 'lock'
+                    THEN amount
+                    ELSE 0
+                END
+            ), 0)
+            +
+            COALESCE(SUM(
+                CASE
+                    WHEN from_address = $1
+                     AND asset        = $2
+                     AND transaction_type = 'lend'
+                    THEN amount
+                    ELSE 0
+                END
+            ), 0)
+            -
+            COALESCE(SUM(
+                CASE
+                    WHEN from_address = $1
+                     AND asset        = $2
+                     AND transaction_type = 'unlock'
+                    THEN amount
+                    ELSE 0
+                END
+            ), 0)
+        ),
+        0
+    ) AS total
+FROM accountassetsledger;
 ";
 
 #[derive(Serialize, Deserialize, QueryableByName)]
