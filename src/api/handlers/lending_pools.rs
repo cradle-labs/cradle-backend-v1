@@ -101,7 +101,7 @@ pub async fn get_loans_handler(
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
-            success: false,
+            success: true,
             data: Some(loans),
             error: None,
         }),
