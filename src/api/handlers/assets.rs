@@ -168,10 +168,7 @@ pub async fn get_asset_balance(
     let token_id = TokenId::from_solidity_address(&asset.token)
         .map_err(|_| ApiError::InternalError("Failed to extract token id".to_string()))?;
 
-    let token_balance = *balance
-        .tokens
-        .get(&token_id)
-        .ok_or_else(|| ApiError::InternalError("Failed to unwrap".to_string()))?;
+    let token_balance = *balance.tokens.get(&token_id).unwrap_or(&0);
 
     let deductions = get_deductions(&mut conn, wallet_data.address, asset_id)
         .map_err(|_| ApiError::InternalError("Failed to get deductions".to_string()))?;
