@@ -396,11 +396,6 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                         transaction: output.transaction_id.clone(),
                     };
 
-                    let res = diesel::insert_into(crate::schema::loanrepayments::table)
-                        .values(&repayment)
-                        .returning(crate::schema::loanrepayments::dsl::id)
-                        .get_result::<Uuid>(app_conn)?;
-
                     update_repayment(
                         app_conn,
                         UpdateRepaymentArgs {
