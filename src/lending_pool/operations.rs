@@ -388,7 +388,7 @@ pub async fn get_loan_repayments<'a>(
     use crate::schema::loanrepayments::dsl::*;
 
     let results = loanrepayments
-        .filter(id.eq(loan_id_value))
+        .filter(loan_id.eq(loan_id_value))
         .get_results::<LoanRepaymentsRecord>(conn)?;
 
     Ok(results)
