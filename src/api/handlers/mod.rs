@@ -7,4 +7,5 @@ pub mod listings;
 pub mod markets;
 pub mod mutation;
 pub mod orders;
+pub mod ramper;
 pub mod time_series;
