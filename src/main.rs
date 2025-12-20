@@ -9,6 +9,7 @@ mod listing;
 mod market;
 mod market_time_series;
 mod order_book;
+pub mod ramper;
 pub mod schema;
 mod sockets;
 pub mod utils;
@@ -30,6 +31,7 @@ use crate::{
     api::handlers::{
         faucet_request::airdrop_request,
         listings::{get_listing_by_id, get_listings},
+        ramper::{handle_callback, request_payment},
     },
     sockets::on_connect,
 };
@@ -138,6 +140,9 @@ async fn main() -> anyhow::Result<()> {
             get(get_loan_repayments_handler),
         )
         .route("/loan/:loan_id", get(get_repaid_handler))
+        // onramp handler
+        .route("/onramp-request", post(request_payment))
+        .route("/onramp-callback", post(handle_callback))
         // Add middleware layers before state binding
         .layer(TraceLayer::new_for_http())
         .layer(auth_layer)
