@@ -415,10 +415,10 @@ pub async fn update_repayment<'a>(conn: DbConn<'a>, args: UpdateRepaymentArgs) -
 
     let repaid_amount = get_repaid_amount(conn, args.loan_id).await?;
 
-    let remaining_amount =
-        big_to_u64!(loan_data.principal_amount)? - big_to_u64!(repaid_amount.repaid_amount)?;
+    let remaining_amount = big_to_u64!(loan_data.principal_amount)? as i64
+        - big_to_u64!(repaid_amount.repaid_amount)? as i64;
 
-    let new_status = if remaining_amount == 0 {
+    let new_status = if remaining_amount <= 0 {
         LoanStatus::Repaid
     } else {
         LoanStatus::Active
