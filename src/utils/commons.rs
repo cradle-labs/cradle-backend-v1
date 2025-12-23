@@ -31,7 +31,12 @@ macro_rules! big_to_u64 {
 
 #[macro_export]
 macro_rules! map_to_api_error {
-    ($call: expr, $msg: literal) => {{ $call.map_err(|_| ApiError::InternalError(String::from($msg))) }};
+    ($call: expr, $msg: literal) => {{
+        $call.map_err(|e| {
+            println!("Something went wrong with call {e}");
+            ApiError::InternalError(String::from($msg))
+        })
+    }};
 }
 
 #[macro_export]
