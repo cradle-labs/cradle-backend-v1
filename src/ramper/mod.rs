@@ -1,13 +1,15 @@
 use crate::{
     accounts::{operations::associate_token, processor_enums::AssociateTokenToWalletInputArgs},
     asset_book::operations::{get_asset, get_wallet},
+    big_to_u64,
     utils::commons::{DbConn, TaskWallet},
 };
 use anyhow::{Result, anyhow};
-use bigdecimal::BigDecimal;
-use clap::Parser;
+use bigdecimal::{BigDecimal, ToPrimitive};
+use clap::{Parser, ValueEnum};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tracing::instrument::WithSubscriber;
 use uuid::Uuid;
 
 #[derive(Parser, Deserialize, Serialize, Clone)]
@@ -45,7 +47,7 @@ pub struct RequestMetadata {
 #[derive(Serialize, Deserialize)]
 pub struct RequestToken {
     pub token: String,
-    pub amount: BigDecimal,
+    pub amount: u64,
     pub email: String,
     pub currency: String,
     pub metadata: RequestMetadata,
@@ -70,12 +72,15 @@ pub struct CallbackData {
     pub amount: String,
     pub currency: Option<String>,
     #[serde(rename = "failureReason")]
-    pub failue_reason: Option<String>,
+    pub failure_reason: Option<String>,
 }
 
 impl Ramper {
     pub fn from_env() -> Result<Self> {
-        Self::try_parse().map_err(|e| anyhow!(e))
+        Self::try_parse().map_err(|e| {
+            println!("Fetch Ramper errror {:?}", e);
+            anyhow!(e)
+        })
     }
 
     pub async fn onramp<'a>(
@@ -100,11 +105,11 @@ impl Ramper {
 
         let ramp_request = RequestToken {
             token: token.symbol,
-            amount: req.amount,
+            amount: big_to_u64!(req.amount)?,
             email: req.email,
             currency: "KES".to_string(),
             metadata: RequestMetadata { order_id },
-            callback_url: self.ramper_callback.clone(),
+            callback_url: req.result_page,
             channels: vec!["card".to_string()],
             crypto_account: wallet_data.contract_id,
         };
