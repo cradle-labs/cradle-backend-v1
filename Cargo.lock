@@ -535,7 +535,7 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 [[package]]
 name = "contract-integrator"
 version = "0.1.0"
-source = "git+https://github.com/cradle-labs/cradle-contract-integrator-v1.git#da8cd7936499b5fbb4a396636b46106ce01ad87e"
+source = "git+https://github.com/cradle-labs/cradle-contract-integrator-v1.git#e1602c70efb023f7c9fe28d577e6be57eeda38bc"
 dependencies = [
  "anyhow",
  "bigdecimal",

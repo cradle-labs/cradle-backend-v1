@@ -18,7 +18,7 @@ pub async fn request_payment(
 
     let res = map_to_api_error!(
         ramper.onramp(&mut wallet, &mut conn, req).await,
-        "Failed to get ramper"
+        "Failed to onramp"
     )?;
 
     Ok((StatusCode::OK, Json(ApiResponse::success(res))))

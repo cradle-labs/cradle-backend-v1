@@ -475,8 +475,6 @@ pub async fn purchase(
 
     let transaction = wallet.execute(transaction_input).await?;
 
-    println!("Transaction :: {:?}", transaction.clone());
-
     let uuid = record_transaction(
         conn,
         Some(account_wallet.address),

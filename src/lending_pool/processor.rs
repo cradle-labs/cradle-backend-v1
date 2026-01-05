@@ -138,16 +138,19 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 )
                 .await?;
 
-                let result = app_config
-                    .wallet
-                    .execute(ContractCallInput::AssetLendingPool(
-                        AssetLendingPoolFunctionsInput::Deposit(DepositArgs {
-                            amount: args.amount.clone(),
-                            user: wallet.address.clone(),
-                            contract_id: pool.pool_contract_id,
-                        }),
-                    ))
-                    .await?;
+                let output = contract_integrator::operations::asset_lending::deposit(
+                    DepositArgs {
+                        amount: args.amount.clone(),
+                        user: wallet.address.clone(),
+                        contract_id: pool.pool_contract_id,
+                    },
+                    &mut app_config.wallet,
+                )
+                .await?;
+
+                let result = ContractCallOutput::AssetLendingPool(
+                    AssetLendingPoolFunctionsOutput::Deposit(output.clone()),
+                );
 
                 record_transaction(
                     app_conn,
@@ -164,32 +167,25 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     None,
                 )?;
 
-                if let ContractCallOutput::AssetLendingPool(
-                    AssetLendingPoolFunctionsOutput::Deposit(output),
-                ) = result.clone()
-                {
-                    let (supplyIndex, yieldTokensAmount) = output
-                        .output
-                        .ok_or_else(|| anyhow!("No output from deposit"))?;
-                    let supply = CreatePoolTransactionRecord {
-                        amount: BigDecimal::from(args.amount.clone()),
-                        pool_id: args.pool.clone(),
-                        wallet_id: wallet.id.clone(),
-                        supply_index: BigDecimal::from(supplyIndex),
-                        transaction: output.transaction_id,
-                        transaction_type: PoolTransactionType::Supply,
-                        yield_token_amount: BigDecimal::from(yieldTokensAmount),
-                    };
+                let (supplyIndex, yieldTokensAmount) = output
+                    .output
+                    .ok_or_else(|| anyhow!("No output from deposit"))?;
+                let supply = CreatePoolTransactionRecord {
+                    amount: BigDecimal::from(args.amount.clone()),
+                    pool_id: args.pool.clone(),
+                    wallet_id: wallet.id.clone(),
+                    supply_index: BigDecimal::from(supplyIndex),
+                    transaction: output.transaction_id,
+                    transaction_type: PoolTransactionType::Supply,
+                    yield_token_amount: BigDecimal::from(yieldTokensAmount),
+                };
 
-                    let res = diesel::insert_into(crate::schema::pooltransactions::table)
-                        .values(&supply)
-                        .returning(crate::schema::pooltransactions::dsl::id)
-                        .get_result::<Uuid>(app_conn)?;
+                let res = diesel::insert_into(crate::schema::pooltransactions::table)
+                    .values(&supply)
+                    .returning(crate::schema::pooltransactions::dsl::id)
+                    .get_result::<Uuid>(app_conn)?;
 
-                    return Ok(LendingPoolFunctionsOutput::SupplyLiquidity(res));
-                }
-
-                Err(anyhow!("Failed to supply liquidity"))
+                return Ok(LendingPoolFunctionsOutput::SupplyLiquidity(res));
             }
             LendingPoolFunctionsInput::WithdrawLiquidity(args) => {
                 let pool = LendingPoolRecord::get(app_conn, args.pool)?;
@@ -200,16 +196,18 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     .filter(cwa_dsl::id.eq(args.wallet))
                     .get_result::<CradleWalletAccountRecord>(app_conn)?;
 
-                let result = app_config
-                    .wallet
-                    .execute(ContractCallInput::AssetLendingPool(
-                        AssetLendingPoolFunctionsInput::Withdraw(WithdrawArgs {
-                            yield_token_amount: args.amount.clone(),
-                            user: wallet.address.clone(),
-                            contract_id: pool.pool_contract_id,
-                        }),
-                    ))
-                    .await?;
+                let output = contract_integrator::operations::asset_lending::withdraw(
+                    WithdrawArgs {
+                        yield_token_amount: args.amount.clone(),
+                        user: wallet.address.clone(),
+                        contract_id: pool.pool_contract_id,
+                    },
+                    &mut app_config.wallet,
+                )
+                .await?;
+                let result = ContractCallOutput::AssetLendingPool(
+                    AssetLendingPoolFunctionsOutput::Withdraw(output.clone()),
+                );
 
                 record_transaction(
                     app_conn,
@@ -226,31 +224,25 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     None,
                 )?;
 
-                if let ContractCallOutput::AssetLendingPool(
-                    AssetLendingPoolFunctionsOutput::Withdraw(output),
-                ) = result
-                {
-                    let (withdrawIndex, underlyingAmount) = output
-                        .output
-                        .ok_or_else(|| anyhow!("No output from withdraw"))?;
-                    let withdraw = CreatePoolTransactionRecord {
-                        amount: BigDecimal::from(args.amount),
-                        pool_id: args.pool.clone(),
-                        wallet_id: wallet.id.clone(),
-                        supply_index: BigDecimal::from(withdrawIndex),
-                        transaction: output.transaction_id,
-                        transaction_type: PoolTransactionType::Withdraw,
-                        yield_token_amount: BigDecimal::from(underlyingAmount),
-                    };
+                let (withdrawIndex, underlyingAmount) = output
+                    .output
+                    .ok_or_else(|| anyhow!("No output from withdraw"))?;
+                let withdraw = CreatePoolTransactionRecord {
+                    amount: BigDecimal::from(args.amount),
+                    pool_id: args.pool.clone(),
+                    wallet_id: wallet.id.clone(),
+                    supply_index: BigDecimal::from(withdrawIndex),
+                    transaction: output.transaction_id,
+                    transaction_type: PoolTransactionType::Withdraw,
+                    yield_token_amount: BigDecimal::from(underlyingAmount),
+                };
 
-                    let res = diesel::insert_into(crate::schema::pooltransactions::table)
-                        .values(&withdraw)
-                        .returning(crate::schema::pooltransactions::dsl::id)
-                        .get_result::<Uuid>(app_conn)?;
+                let res = diesel::insert_into(crate::schema::pooltransactions::table)
+                    .values(&withdraw)
+                    .returning(crate::schema::pooltransactions::dsl::id)
+                    .get_result::<Uuid>(app_conn)?;
 
-                    return Ok(LendingPoolFunctionsOutput::WithdrawLiquidity(res));
-                }
-                Err(anyhow!("Failed to withdraw liquidity"))
+                return Ok(LendingPoolFunctionsOutput::WithdrawLiquidity(res));
             }
             LendingPoolFunctionsInput::BorrowAsset(args) => {
                 let pool = LendingPoolRecord::get(app_conn, args.pool)?;
@@ -265,6 +257,8 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 let collateral_record = asset_book
                     .filter(id.eq(args.collateral))
                     .get_result::<AssetBookRecord>(app_conn)?;
+
+                println!("checkpoint-1");
 
                 // auto associate and grant kyc to account for user
                 associate_token(
@@ -287,18 +281,24 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 )
                 .await?;
 
-                let res = app_config
-                    .wallet
-                    .execute(ContractCallInput::AssetLendingPool(
-                        AssetLendingPoolFunctionsInput::Borrow(BorrowArgs {
-                            collateral_asset: collateral_record.token.clone(),
-                            collateral_amount: args.amount.clone(),
-                            user: wallet.address.clone(),
-                            contract_id: pool.pool_contract_id.to_string(),
-                        }),
-                    ))
-                    .await?;
+                println!("checkpoint-2");
 
+                let output = contract_integrator::operations::asset_lending::borrow(
+                    BorrowArgs {
+                        collateral_asset: collateral_record.token.clone(),
+                        collateral_amount: args.amount.clone(),
+                        user: wallet.address.clone(),
+                        contract_id: pool.pool_contract_id.to_string(),
+                    },
+                    &mut app_config.wallet,
+                )
+                .await?;
+
+                let res = ContractCallOutput::AssetLendingPool(
+                    AssetLendingPoolFunctionsOutput::Borrow(output.clone()),
+                );
+
+                println!("checkpoint-3");
                 record_transaction(
                     app_conn,
                     Some(wallet.address.clone()),
@@ -314,33 +314,28 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     None,
                 )?;
 
-                if let ContractCallOutput::AssetLendingPool(
-                    AssetLendingPoolFunctionsOutput::Borrow(output),
-                ) = res
-                {
-                    let data = output
-                        .output
-                        .ok_or_else(|| anyhow!("No output from borrow"))?;
-                    let new_borrow = CreateLoanRecord {
-                        account_id: wallet.cradle_account_id.clone(),
-                        wallet_id: wallet.id.clone(),
-                        pool: args.pool.clone(),
-                        transaction: Some(output.transaction_id.clone()),
-                        borrow_index: BigDecimal::from(data.borrow_index),
-                        principal_amount: BigDecimal::from(data.borrowed_amount),
-                        status: LoanStatus::Active,
-                        collateral_asset: args.collateral,
-                    };
+                println!("checkpoint-4");
 
-                    let loan_id = diesel::insert_into(crate::schema::loans::table)
-                        .values(&new_borrow)
-                        .returning(crate::schema::loans::dsl::id)
-                        .get_result::<Uuid>(app_conn)?;
+                let data = output
+                    .output
+                    .ok_or_else(|| anyhow!("No output from borrow"))?;
+                let new_borrow = CreateLoanRecord {
+                    account_id: wallet.cradle_account_id.clone(),
+                    wallet_id: wallet.id.clone(),
+                    pool: args.pool.clone(),
+                    transaction: Some(output.transaction_id.clone()),
+                    borrow_index: BigDecimal::from(data.borrow_index),
+                    principal_amount: BigDecimal::from(data.borrowed_amount),
+                    status: LoanStatus::Active,
+                    collateral_asset: args.collateral,
+                };
 
-                    return Ok(LendingPoolFunctionsOutput::BorrowAsset(loan_id));
-                }
+                let loan_id = diesel::insert_into(crate::schema::loans::table)
+                    .values(&new_borrow)
+                    .returning(crate::schema::loans::dsl::id)
+                    .get_result::<Uuid>(app_conn)?;
 
-                Err(anyhow!("Failed to borrow asset"))
+                return Ok(LendingPoolFunctionsOutput::BorrowAsset(loan_id));
             }
             LendingPoolFunctionsInput::RepayBorrow(args) => {
                 use crate::schema::cradlewalletaccounts::dsl as cwa_dsl;
@@ -360,19 +355,20 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     .filter(crate::schema::asset_book::dsl::id.eq(loan.collateral_asset))
                     .get_result::<AssetBookRecord>(app_conn)?;
 
-                let result = app_config
-                    .wallet
-                    .execute(ContractCallInput::AssetLendingPool(
-                        AssetLendingPoolFunctionsInput::Repay(
-                            contract_integrator::utils::functions::asset_lending::RepayArgs {
-                                user: wallet.address.clone(),
-                                collateralized_asset: collateral_record.token.clone(),
-                                repay_amount: args.amount,
-                                contract_id: pool.pool_contract_id,
-                            },
-                        ),
-                    ))
-                    .await?;
+                let output = contract_integrator::operations::asset_lending::repay(
+                    contract_integrator::utils::functions::asset_lending::RepayArgs {
+                        user: wallet.address.clone(),
+                        collateralized_asset: collateral_record.token.clone(),
+                        repay_amount: args.amount,
+                        contract_id: pool.pool_contract_id,
+                    },
+                    &mut app_config.wallet,
+                )
+                .await?;
+
+                let result = ContractCallOutput::AssetLendingPool(
+                    AssetLendingPoolFunctionsOutput::Repay(output.clone()),
+                );
 
                 record_transaction(
                     app_conn,
@@ -386,30 +382,23 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     None,
                 )?;
 
-                if let ContractCallOutput::AssetLendingPool(
-                    AssetLendingPoolFunctionsOutput::Repay(output),
-                ) = result
-                {
-                    let repayment = crate::lending_pool::db_types::CreateLoanRepaymentRecord {
+                let repayment = crate::lending_pool::db_types::CreateLoanRepaymentRecord {
+                    loan_id: loan.id,
+                    repayment_amount: BigDecimal::from(args.amount),
+                    transaction: output.transaction_id.clone(),
+                };
+
+                update_repayment(
+                    app_conn,
+                    UpdateRepaymentArgs {
                         loan_id: loan.id,
-                        repayment_amount: BigDecimal::from(args.amount),
+                        amount: args.amount,
                         transaction: output.transaction_id.clone(),
-                    };
+                    },
+                )
+                .await?;
 
-                    update_repayment(
-                        app_conn,
-                        UpdateRepaymentArgs {
-                            loan_id: loan.id,
-                            amount: args.amount,
-                            transaction: output.transaction_id.clone(),
-                        },
-                    )
-                    .await?;
-
-                    return Ok(LendingPoolFunctionsOutput::RepayBorrow());
-                }
-
-                Err(anyhow!("Failed to repay borrow"))
+                return Ok(LendingPoolFunctionsOutput::RepayBorrow());
             }
             LendingPoolFunctionsInput::LiquidatePosition(args) => {
                 use crate::schema::cradlewalletaccounts::dsl as cwa_dsl;
@@ -455,21 +444,21 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 )
                 .await?;
 
-                let result = app_config
-                    .wallet
-                    .execute(ContractCallInput::AssetLendingPool(
-                        AssetLendingPoolFunctionsInput::Liquidate(
-                            contract_integrator::utils::functions::asset_lending::LiquidateArgs {
-                                liquidator: liquidator_wallet.address.clone(),
-                                borrower: borrower_wallet.address.clone(),
-                                dept_to_cover: args.amount,
-                                collateral_asset: collateral_record.token.clone(),
-                                contract_id: pool.pool_contract_id,
-                            },
-                        ),
-                    ))
-                    .await?;
+                let output = contract_integrator::operations::asset_lending::liquidate(
+                    contract_integrator::utils::functions::asset_lending::LiquidateArgs {
+                        liquidator: liquidator_wallet.address.clone(),
+                        borrower: borrower_wallet.address.clone(),
+                        dept_to_cover: args.amount,
+                        collateral_asset: collateral_record.token.clone(),
+                        contract_id: pool.pool_contract_id,
+                    },
+                    &mut app_config.wallet,
+                )
+                .await?;
 
+                let result = ContractCallOutput::AssetLendingPool(
+                    AssetLendingPoolFunctionsOutput::Liquidate(output.clone()),
+                );
                 record_transaction(
                     app_conn,
                     Some(liquidator_wallet.address.clone()),
@@ -485,26 +474,19 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     Some(borrower_wallet.address),
                 )?;
 
-                if let ContractCallOutput::AssetLendingPool(
-                    AssetLendingPoolFunctionsOutput::Liquidate(output),
-                ) = result
-                {
-                    let liquidation = crate::lending_pool::db_types::CreateLoanLiquidationRecord {
-                        loan_id: loan.id,
-                        liquidator_wallet_id: liquidator_wallet.id,
-                        liquidation_amount: BigDecimal::from(args.amount),
-                        transaction: output.transaction_id,
-                    };
+                let liquidation = crate::lending_pool::db_types::CreateLoanLiquidationRecord {
+                    loan_id: loan.id,
+                    liquidator_wallet_id: liquidator_wallet.id,
+                    liquidation_amount: BigDecimal::from(args.amount),
+                    transaction: output.transaction_id,
+                };
 
-                    let res = diesel::insert_into(crate::schema::loanliquidations::table)
-                        .values(&liquidation)
-                        .returning(crate::schema::loanliquidations::dsl::id)
-                        .get_result::<Uuid>(app_conn)?;
+                let res = diesel::insert_into(crate::schema::loanliquidations::table)
+                    .values(&liquidation)
+                    .returning(crate::schema::loanliquidations::dsl::id)
+                    .get_result::<Uuid>(app_conn)?;
 
-                    return Ok(LendingPoolFunctionsOutput::LiquidatePosition());
-                }
-
-                Err(anyhow!("Failed to liquidate position"))
+                return Ok(LendingPoolFunctionsOutput::LiquidatePosition());
             }
         }
     }
