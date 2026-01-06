@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use contract_integrator::{
+    id_to_evm_address,
     utils::functions::{
         ContractCallInput, ContractCallOutput,
         asset_factory::{AssetFactoryFunctionInput, AssetFactoryFunctionOutput},
@@ -10,7 +11,7 @@ use contract_integrator::{
         asset_manager::{
             AirdropArgs, AssetManagerFunctionInput, AssetManagerFunctionOutput, MintArgs,
         },
-        commons::get_contract_id_from_evm_address,
+        commons::{get_contract_addresses, get_contract_id_from_evm_address},
     },
     wallet::wallet::ActionWallet,
 };
@@ -38,6 +39,21 @@ pub async fn create_asset(
 ) -> Result<Uuid> {
     let contract_ids = wallet.get_contract_ids()?;
 
+    let acl_evm_add = get_contract_addresses(
+        contract_ids
+            .access_controller_contract_id
+            .to_string()
+            .as_str(),
+    )
+    .await?;
+
+    println!(
+        "Address {:?}",
+        contract_ids
+            .access_controller_contract_id
+            .to_solidity_address()?
+    );
+
     let result = match args.asset_type.clone() {
         AssetType::Bridged => {
             let input = ContractCallInput::BridgedAssetIssuer(
@@ -45,10 +61,8 @@ pub async fn create_asset(
                     contract_id: contract_ids.bridged_asset_issuer_contract_id.to_string(),
                     symbol: args.symbol.clone(),
                     name: args.name.clone(),
-                    acl_contract: contract_ids
-                        .access_controller_contract_id
-                        .to_solidity_address()?,
-                    allow_list: 2,
+                    acl_contract: acl_evm_add.clone(),
+                    allow_list: 1,
                 }),
             );
 
@@ -69,9 +83,7 @@ pub async fn create_asset(
                     contract_id: contract_ids.native_asset_issuer_contract_id.to_string(),
                     symbol: args.symbol.clone(),
                     name: args.name.clone(),
-                    acl_contract: contract_ids
-                        .access_controller_contract_id
-                        .to_solidity_address()?,
+                    acl_contract: acl_evm_add.clone(),
                     allow_list: 1,
                 }),
             );
@@ -92,9 +104,7 @@ pub async fn create_asset(
                 contract_integrator::utils::functions::asset_factory::CreateAssetArgs {
                     name: args.name.clone(),
                     symbol: args.symbol.clone(),
-                    acl_contract: contract_ids
-                        .access_controller_contract_id
-                        .to_solidity_address()?,
+                    acl_contract: acl_evm_add.clone(),
                     allow_list: 1,
                 },
             ));

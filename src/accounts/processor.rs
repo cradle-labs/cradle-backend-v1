@@ -406,49 +406,22 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                         .get_results::<AssetBookRecord>(action_conn)?;
 
                     for token in unassociated_tokens {
-                        let res = local_config
-                            .wallet
-                            .execute(ContractCallInput::CradleAccount(
-                                CradleAccountFunctionInput::AssociateToken(AssociateTokenArgs {
-                                    account_contract_id: wallet.contract_id.clone(),
-                                    token: token.token.clone(),
-                                }),
-                            ))
-                            .await?;
-
-                        if let ContractCallOutput::CradleAccount(
-                            CradleAccountFunctionOutput::AssociateToken(_),
-                        ) = res
+                        if token.symbol == String::from("CpUSD")
+                            || token.symbol == String::from("CKS")
+                            || token.symbol == String::from("cd")
+                            || token.symbol == String::from("c")
                         {
-                            // insert or update the accountassetbook to reflect the association
-                            let now = Utc::now().naive_utc();
-                            let asset_book_entry = CreateAccountAssetBook {
-                                asset_id: token.id.clone(),
-                                account_id: wallet_id.clone(),
-                                associated: Some(true),
-                                kyced: None,
-                                associated_at: Some(now),
-                                kyced_at: None,
-                            };
-
-                            diesel::insert_into(accountassetbook::table)
-                                .values(&asset_book_entry)
-                                .on_conflict((
-                                    accountassetbook::dsl::asset_id,
-                                    accountassetbook::dsl::account_id,
-                                ))
-                                .do_update()
-                                .set((
-                                    accountassetbook::dsl::associated.eq(true),
-                                    accountassetbook::dsl::associated_at.eq(now),
-                                ))
-                                .execute(action_conn)?;
-                        } else {
-                            return Err(anyhow!(
-                                "Unable to associate token {}",
-                                token.token.clone()
-                            ));
-                        }
+                            continue;
+                        };
+                        associate_token(
+                            action_conn,
+                            &mut app_config.wallet,
+                            AssociateTokenToWalletInputArgs {
+                                wallet_id: wallet.id,
+                                token: token.id,
+                            },
+                        )
+                        .await?;
                     }
                     return Ok(AccountsProcessorOutput::HandleAssociateAssets);
                 }
@@ -478,48 +451,22 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                         .get_results::<AssetBookRecord>(action_conn)?;
 
                     for token in unassociated_tokens {
-                        let res = app_config
-                            .wallet
-                            .execute(ContractCallInput::AssetManager(
-                                AssetManagerFunctionInput::GrantKYC(
-                                    token.asset_manager,
-                                    wallet.address.clone(),
-                                ),
-                            ))
-                            .await?;
-                        if let ContractCallOutput::AssetManager(
-                            AssetManagerFunctionOutput::GrantKYC(_),
-                        ) = res
+                        if token.symbol == String::from("CpUSD")
+                            || token.symbol == String::from("CKS")
+                            || token.symbol == String::from("cd")
+                            || token.symbol == String::from("c")
                         {
-                            // update the accountassetbook to reflect the KYC grant
-                            let now = Utc::now().naive_utc();
-                            let asset_book_entry = CreateAccountAssetBook {
-                                asset_id: token.id.clone(),
-                                account_id: wallet_id.clone(),
-                                associated: None,
-                                kyced: Some(true),
-                                associated_at: None,
-                                kyced_at: Some(now),
-                            };
-
-                            diesel::insert_into(accountassetbook::table)
-                                .values(&asset_book_entry)
-                                .on_conflict((
-                                    accountassetbook::dsl::asset_id,
-                                    accountassetbook::dsl::account_id,
-                                ))
-                                .do_update()
-                                .set((
-                                    accountassetbook::dsl::kyced.eq(true),
-                                    accountassetbook::dsl::kyced_at.eq(now),
-                                ))
-                                .execute(action_conn)?;
-                        } else {
-                            return Err(anyhow!(
-                                "Unable to grant kyc for token {}",
-                                token.token.clone()
-                            ));
-                        }
+                            continue;
+                        };
+                        kyc_token(
+                            action_conn,
+                            &mut app_config.wallet,
+                            GrantKYCInputArgs {
+                                wallet_id: wallet_id.clone(),
+                                token: token.id,
+                            },
+                        )
+                        .await?;
                     }
                     return Ok(AccountsProcessorOutput::HandleKYCAssets);
                 }

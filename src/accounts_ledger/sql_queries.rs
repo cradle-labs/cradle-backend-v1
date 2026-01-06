@@ -60,10 +60,12 @@ pub fn get_deductions(
     address: String,
     asset: Uuid,
 ) -> Result<DeductionResult> {
-    let res = diesel::sql_query(DEDUCTIONS_QUERY)
+    let mut res = diesel::sql_query(DEDUCTIONS_QUERY)
         .bind::<diesel::sql_types::Text, _>(address)
         .bind::<diesel::sql_types::Uuid, _>(asset)
         .get_result::<DeductionResult>(conn)?;
+
+    res.total = res.total.abs();
 
     Ok(res)
 }
