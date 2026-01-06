@@ -35,7 +35,7 @@ SELECT
             -
             COALESCE(SUM(
                 CASE
-                    WHEN from_address = $1
+                    WHEN to_address = $1
                      AND asset        = $2
                      AND transaction_type = 'unlock'
                     THEN amount

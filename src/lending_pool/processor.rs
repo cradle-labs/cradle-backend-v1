@@ -281,6 +281,8 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                 )
                 .await?;
 
+                
+
                 println!("checkpoint-2");
 
                 let output = contract_integrator::operations::asset_lending::borrow(
