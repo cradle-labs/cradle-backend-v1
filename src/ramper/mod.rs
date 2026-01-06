@@ -104,7 +104,7 @@ impl Ramper {
         let order_id = Uuid::new_v4().to_string();
 
         let ramp_request = RequestToken {
-            token: token.symbol,
+            token: token.name,
             amount: big_to_u64!(req.amount)?,
             email: req.email,
             currency: "KES".to_string(),

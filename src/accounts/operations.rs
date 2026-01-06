@@ -297,6 +297,7 @@ pub async fn kyc_token(
     if is_kyced {
         return Ok(());
     };
+
     let account_wallet = {
         use crate::schema::cradlewalletaccounts::dsl::*;
 
@@ -315,6 +316,12 @@ pub async fn kyc_token(
             .get_result::<AssetBookRecord>(conn)?;
 
         res
+    };
+
+    println!("asset manager {:?}", asset.asset_manager.clone());
+
+    if !asset.asset_manager.contains(".") {
+        return Ok(());
     };
 
     let res = wallet
