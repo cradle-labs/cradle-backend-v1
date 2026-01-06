@@ -10,6 +10,7 @@ use crate::accounts::db_types::CradleWalletAccountRecord;
 use crate::accounts_ledger::db_types::{AccountLedgerTransactionType, CreateLedgerEntry};
 use crate::accounts_ledger::operations::{create_ledger_entry, record_transaction, RecordTransactionAssets};
 use crate::asset_book::db_types::AssetBookRecord;
+use crate::big_to_u64;
 use crate::order_book::db_types::{OrderBookRecord, OrderBookTradeRecord, OrderStatus, SettlementStatus};
 use crate::utils::app_config::AppConfig;
 use anyhow::{anyhow, Result};
@@ -195,8 +196,8 @@ pub async fn settle_order(
             taker_wallet.clone(),
             trade.taker_filled_amount.clone(),
             trade.maker_filled_amount.clone(),
-            taker_asset,
-            maker_asset
+            taker_asset.clone(),
+            maker_asset.clone()
         ).await {
             Ok(tx)=>tx,
             Err(e)=>{
@@ -209,7 +210,7 @@ pub async fn settle_order(
 
         println!("Settlement tx id :: {:?}", settlement_tx_id);
 
-        record_settled_order(conn, trade.id, settlement_tx_id)?;
+        record_settled_order(conn, trade.id, settlement_tx_id.clone())?;
 
         let maker_bid_fill = update_order_fill(
             conn,
