@@ -29,9 +29,7 @@ use crate::{
 use anyhow::{Result, anyhow};
 use bigdecimal::BigDecimal;
 use contract_integrator::{
-    hedera::ContractId,
-    id_to_address, id_to_evm_address,
-    utils::functions::{
+    hedera::ContractId, id_to_address, id_to_evm_address, operations::asset_lending::update_indices, utils::functions::{
         ContractCallInput, ContractCallOutput,
         asset_lending::{
             AssetLendingPoolFunctionsInput, AssetLendingPoolFunctionsOutput, GetPoolStatsOutput,
@@ -43,7 +41,7 @@ use contract_integrator::{
             CreatePoolArgs,
         },
         commons::{get_contract_addresses, get_contract_id_from_evm_address},
-    },
+    }
 };
 use diesel::r2d2::PooledConnection;
 use serde::{Deserialize, Serialize};
@@ -316,6 +314,8 @@ pub async fn get_loan_position<'a>(
     let wallet_data = get_wallet(conn, loan.wallet_id).await?;
     let collateral = get_asset(conn, loan.collateral_asset).await?;
     let pool = get_pool(conn, loan.pool).await?;
+
+    update_indices(pool.pool_contract_id.clone(), wallet).await?;
 
     let tx_instruction = ContractCallInput::AssetLendingPool(
         AssetLendingPoolFunctionsInput::GetUserBorrowPosition(GetUserBorrowPosition {
