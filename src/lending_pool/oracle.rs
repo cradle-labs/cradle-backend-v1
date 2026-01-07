@@ -1,5 +1,5 @@
 use bigdecimal::{BigDecimal, ToPrimitive};
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use contract_integrator::utils::functions::asset_lending::UpdateOracleArgs;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -36,12 +36,21 @@ pub fn create_price_oracle<'a>(conn: DbConn<'a>, args: CreatePriceOracle)->Resul
 }
 
 pub fn update_price_oracle<'a>(conn: DbConn<'a>, lending_pool: Uuid, asset: Uuid, price: BigDecimal)->Result<()> {
-    
-    diesel::update(lpop::table).filter(
-        lpop::lending_pool_id.eq(lending_pool).and(
-            lpop::asset_id.eq(asset)
-        )
-    ).set(lpop::dsl::price.eq(price)).execute(conn)?;
+
+    let new_oracle = CreatePriceOracle {
+        lending_pool_id: lending_pool,
+        asset_id: asset,
+        price,
+        recorded_at: Utc::now().naive_utc()
+    };
+
+
+    diesel::insert_into(lpop::table)
+        .values(&new_oracle)
+        .on_conflict((lpop::dsl::lending_pool_id, lpop::dsl::asset_id))
+        .do_update()
+        .set(lpop::dsl::price.eq(&new_oracle.price))
+        .execute(conn)?;
 
     Ok(())
 }
@@ -69,6 +78,8 @@ pub async fn publish_price<'a>(conn: DbConn<'a>, wallet: TaskWallet<'a>, lending
     }, wallet).await?;
 
     println!("TX :: {:?}", res.transaction_id);
+
+    update_price_oracle(conn, lending_pool, asset_id, price)?;
 
     Ok(())
 }
