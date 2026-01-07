@@ -140,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
             get(get_loan_repayments_handler),
         )
         .route("/loan/:loan_id", get(get_repaid_handler))
+        .route("/oracle/:pool_id/:asset_id", get(get_oracle_price))
         // onramp handler
         .route("/onramp-request", post(request_payment))
         .route("/onramp-callback", post(handle_callback))

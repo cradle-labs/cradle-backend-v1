@@ -143,6 +143,11 @@ pub fn dashboard(account_id: Uuid, balances: Vec<Balance>) -> String {
                         hx-target="#tab-content">
                     Listings
                 </button>
+                <button class="px-6 py-3 text-sm font-medium text-gray-400 border-b-2 border-transparent hover:text-gray-200 hover:bg-gray-700/50 rounded-t-lg transition-colors focus:outline-none"
+                        hx-get="/ui/tabs/oracle?account_id={}"
+                        hx-target="#tab-content">
+                    Oracle
+                </button>
             </div>
 
             <!-- Tab Content Area -->
@@ -168,7 +173,7 @@ pub fn dashboard(account_id: Uuid, balances: Vec<Balance>) -> String {
         </script>
         "##,
         account_id,
-        account_id, account_id, account_id, account_id, account_id, account_id
+        account_id, account_id, account_id, account_id, account_id, account_id, account_id
     )
 }
 
@@ -981,5 +986,109 @@ pub fn withdraw_listing_form(listing_id: Uuid, account_id: Uuid) -> String {
         </form>
         "##,
         listing_id, account_id
+    )
+}
+// Oracle Tab Templates
+
+pub fn oracle_tab(account_id: Uuid, pools: Vec<LendingPoolRecord>, assets: Vec<AssetBookRecord>) -> String {
+    let mut pool_opts = String::new();
+    for p in &pools {
+        let name = p.name.as_ref().map(|n| n.as_str()).unwrap_or("Unnamed Pool");
+        pool_opts.push_str(&format!(
+            r##"<option value="{}">{}</option>"##,
+            p.id, name
+        ));
+    }
+
+    let mut asset_opts = String::new();
+    for a in &assets {
+        asset_opts.push_str(&format!(
+            r##"<option value="{}">{} ({})</option>"##,
+            a.id, a.symbol, a.name
+        ));
+    }
+
+    format!(
+        r##"
+        <div class="space-y-6">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-white mb-2">Oracle Price Configuration</h2>
+                <p class="text-gray-400">Configure oracle prices for lending pool assets.</p>
+            </div>
+
+            <!-- Pool Selector -->
+            <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <label class="block text-sm font-medium text-gray-300 mb-2">Select Lending Pool</label>
+                <select id="oracle-pool-selector" 
+                        class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3 focus:ring-2 focus:ring-blue-500">
+                    <option value="">-- Select a Pool --</option>
+                    {}
+                </select>
+            </div>
+
+            <!-- Asset Selector -->
+            <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <label class="block text-sm font-medium text-gray-300 mb-2">Select Asset</label>
+                <select id="oracle-asset-selector" 
+                        class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3 focus:ring-2 focus:ring-blue-500">
+                    <option value="">-- Select an Asset --</option>
+                    {}
+                </select>
+            </div>
+
+            <!-- Price Configuration Form -->
+            <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <h3 class="text-xl font-bold text-white mb-4">Set Oracle Price</h3>
+                <div id="oracle-form-content">
+                    <p class="text-gray-400 text-center">Select a pool and asset to configure pricing</p>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const poolSelector = document.getElementById('oracle-pool-selector');
+            const assetSelector = document.getElementById('oracle-asset-selector');
+            const formContent = document.getElementById('oracle-form-content');
+            const accountId = '{}';
+
+            function updateForm() {{
+                const poolId = poolSelector.value;
+                const assetId = assetSelector.value;
+
+                if (!poolId || !assetId) {{
+                    formContent.innerHTML = '<p class="text-gray-400 text-center">Select a pool and asset to configure pricing</p>';
+                    return;
+                }}
+
+                // Render the price form
+                formContent.innerHTML = `
+                    <form hx-post="/ui/oracle/set_price" hx-target="#oracle-result" class="space-y-4">
+                        <input type="hidden" name="pool_id" value="${{poolId}}" />
+                        <input type="hidden" name="asset_id" value="${{assetId}}" />
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Price Multiplier</label>
+                            <input type="number" step="0.000001" name="price" placeholder="1.0" 
+                                   class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-blue-500" required>
+                            <p class="text-xs text-gray-500 mt-1">Enter price in reserve asset decimals (e.g., 1.5 for 1.5x)</p>
+                        </div>
+                        
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg">
+                            Update Oracle Price
+                        </button>
+                        
+                        <div id="oracle-result"></div>
+                    </form>
+                `;
+                
+                // Re-process htmx for the new form
+                htmx.process(formContent);
+            }}
+
+            poolSelector.addEventListener('change', updateForm);
+            assetSelector.addEventListener('change', updateForm);
+        </script>
+        "##,
+        pool_opts, asset_opts, account_id
     )
 }

@@ -45,6 +45,10 @@ use cradle_back_end::listing::operations::{
     ReturnAssetListingInputArgs, WithdrawToBeneficiaryInputArgsBody
 };
 
+// Oracle ops
+use cradle_back_end::lending_pool::oracle::publish_price;
+use cradle_back_end::lending_pool::operations::get_pool;
+
 mod templates;
 
 #[derive(Clone)]
@@ -96,6 +100,9 @@ pub fn router(config: AppConfig) -> Router {
         .route("/ui/listings/return", post(return_listing_handler))
         .route("/ui/listings/withdraw", post(withdraw_listing_handler))
         .route("/ui/listings/stats", get(listing_stats_handler))
+        // Oracle
+        .route("/ui/tabs/oracle", get(oracle_tab_handler))
+        .route("/ui/oracle/set_price", post(set_oracle_price_handler))
         .with_state(state)
 }
 
@@ -724,6 +731,14 @@ struct WithdrawListingForm {
     listing_id: Uuid,
     account_id: Uuid,
     amount: String,
+}
+
+// Oracle Form Structs
+#[derive(Deserialize)]
+struct SetOraclePriceForm {
+    pool_id: Uuid,
+    asset_id: Uuid,
+    price: String,
 }
 
 // Lending Handlers
@@ -1516,6 +1531,98 @@ async fn listing_stats_handler(
         Err(e) => {
             eprintln!("[LISTINGS] Failed to get stats: {:?}", e);
             Html(format!("<p class='text-red-400'>Failed to load stats: {}</p>", e))
+        }
+    }
+}
+
+// Oracle Handlers
+async fn oracle_tab_handler(
+    State(state): State<AppState>,
+    Query(params): Query<QueryParams>,
+) -> Html<String> {
+    eprintln!("[ORACLE] Tab handler called - account_id: {:?}", params.account_id);
+    let account_id = params.account_id.unwrap_or_default();
+    
+    use diesel::prelude::*;
+    use cradle_back_end::schema::lendingpool::dsl as lp_dsl;
+    use cradle_back_end::schema::asset_book::dsl as ab_dsl;
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+    
+    let pool = state.config.pool.clone();
+    eprintln!("[ORACLE] Fetching pools and assets from database");
+    
+    let (pools, assets) = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().ok()?;
+        let all_pools = lp_dsl::lendingpool
+            .load::<LendingPoolRecord>(&mut conn)
+            .ok()?;
+        let all_assets = ab_dsl::asset_book
+            .load::<AssetBookRecord>(&mut conn)
+            .ok()?;
+        Some((all_pools, all_assets))
+    }).await.unwrap().unwrap_or((vec![], vec![]));
+    
+    eprintln!("[ORACLE] Found {} pools and {} assets", pools.len(), assets.len());
+    Html(templates::oracle_tab(account_id, pools, assets))
+}
+
+async fn set_oracle_price_handler(
+    State(state): State<AppState>,
+    Form(form): Form<SetOraclePriceForm>,
+) -> Html<String> {
+    eprintln!("[ORACLE] Set price request: pool={}, asset={}, price={}", 
+        form.pool_id, form.asset_id, form.price);
+    
+    use diesel::prelude::*;
+    use cradle_back_end::schema::{lendingpool::dsl as lp_dsl, asset_book::dsl as ab_dsl};
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+    
+    // Get pool and reserve asset to determine decimals
+    let pool_clone = state.config.pool.clone();
+    let pool_id = form.pool_id;
+    
+    let decimals = match tokio::task::spawn_blocking(move || {
+        let mut conn = pool_clone.get().ok()?;
+        let pool = lp_dsl::lendingpool
+            .find(pool_id)
+            .first::<LendingPoolRecord>(&mut conn)
+            .ok()?;
+        let reserve = ab_dsl::asset_book
+            .find(pool.reserve_asset)
+            .first::<AssetBookRecord>(&mut conn)
+            .ok()?;
+        Some(reserve.decimals)
+    }).await.unwrap() {
+        Some(d) => d,
+        None => return Html("<div class='text-red-400'>Failed to fetch pool/reserve asset data</div>".to_string())
+    };
+    
+    // Parse and scale price
+    let price = BigDecimal::from_str(&form.price).unwrap_or_default();
+    let multiplier = BigDecimal::from(10i64.pow(decimals as u32));
+    let scaled_price = price * multiplier;
+    
+    eprintln!("[ORACLE] Scaled price: {} (multiplier: 10^{})", scaled_price, decimals);
+    
+    // Get DB connection and wallet
+    let mut app_config_clone = (*state.config).clone();
+    let mut wallet = app_config_clone.wallet;
+    let pool_db = state.config.pool.clone();
+    let mut conn = match pool_db.get() {
+        Ok(c) => c,
+        Err(_) => return Html("<div class='text-red-400'>Database connection failed</div>".to_string())
+    };
+    
+    // Call oracle::publish_price
+    eprintln!("[ORACLE] Publishing price to oracle contract...");
+    match publish_price(&mut conn, &mut wallet, form.pool_id, form.asset_id, scaled_price).await {
+        Ok(_) => {
+            eprintln!("[ORACLE] Price published successfully");
+            Html("<div class='bg-green-800 p-4 rounded text-green-200'>Oracle price updated successfully!</div>".to_string())
+        },
+        Err(e) => {
+            eprintln!("[ORACLE] Price publication failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>Failed to update oracle price: {}</div>", e))
         }
     }
 }

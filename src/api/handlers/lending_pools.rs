@@ -16,12 +16,10 @@ use crate::{
     lending_pool::{
         db_types::{
             LendingPoolRecord, LoanLiquidationsRecord, LoanRecord, LoanRepaymentsRecord, LoanStatus,
-        },
-        operations::{
+        }, operations::{
             RepaymentAmount, get_loan_position, get_loan_repayments, get_pool_deposit_position,
             get_pool_stats, get_repaid_amount,
-        },
-        processor_enums::{LendingPoolFunctionsInput, LendingPoolFunctionsOutput},
+        }, oracle::{PriceOracle, get_price_oracle}, processor_enums::{LendingPoolFunctionsInput, LendingPoolFunctionsOutput}
     },
     map_to_api_error,
     schema::lendingpoolsnapshots::lending_pool_id,
@@ -207,6 +205,28 @@ pub async fn get_repaid_handler(
     let results = map_to_api_error!(
         get_repaid_amount(&mut conn, loan_id).await,
         "Failed to get loan repayments"
+    )?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            success: true,
+            data: Some(results),
+            error: None,
+        }),
+    ))
+}
+
+
+pub async fn get_oracle_price(
+    State(app_config): State<AppConfig>,
+    Path((pool_id, asset_id)): Path<(Uuid, Uuid)>,
+) -> Result<(StatusCode, Json<ApiResponse<PriceOracle>>), ApiError> {
+    let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
+
+    let results = map_to_api_error!(
+        get_price_oracle(&mut conn, pool_id, asset_id),
+        "Failed to get collateral price"
     )?;
 
     Ok((

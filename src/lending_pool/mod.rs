@@ -3,3 +3,4 @@ pub mod db_types;
 pub mod operations;
 pub mod processor;
 pub mod processor_enums;
+pub mod oracle;
