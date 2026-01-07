@@ -395,6 +395,7 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
 
                 update_repayment(
                     app_conn,
+                    &mut app_config.wallet,
                     UpdateRepaymentArgs {
                         loan_id: loan.id,
                         amount: args.amount,
