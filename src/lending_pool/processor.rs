@@ -376,7 +376,10 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     app_conn,
                     Some(wallet.address.clone()),
                     None,
-                    RecordTransactionAssets::Single(pool.reserve_asset),
+                    RecordTransactionAssets::Repay(BorrowAssets {
+                        collateral: collateral_record.id,
+                        borrowed: pool.reserve_asset,
+                    }),
                     Some(args.amount),
                     Some(result.clone()),
                     None,
