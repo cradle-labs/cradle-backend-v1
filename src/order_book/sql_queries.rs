@@ -53,11 +53,11 @@ WHERE
     AND (
         -- If incoming order is MARKET, skip price check (match any price)
         io.order_type = 'market'
-        OR
+        -- OR
         -- If incoming order is LIMIT, enforce price compatibility
         -- Incoming order asks for ob.ask_asset and offers ob.bid_asset
             -- For proper matching: incoming price must satisfy the maker's price
-        (io.order_type = 'limit' AND io.price >= ob.price)
+        -- (io.order_type = 'limit' AND io.price >= ob.price)
     )
 
     AND NOT EXISTS (
@@ -85,6 +85,8 @@ pub async fn get_matching_orders(
     let result = diesel::sql_query(MATCHING_ORDERS)
         .bind::<diesel::sql_types::Uuid, _>(&incoming_order)
         .get_results::<MatchingOrderResult>(conn)?;
+
+    println!("Matching Orders :: {:?}", result.clone());
 
     Ok(result)
 }
