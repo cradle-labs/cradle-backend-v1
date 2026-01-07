@@ -400,7 +400,7 @@ pub struct UpdateRepaymentArgs {
     pub amount: u64,
     pub transaction: String,
 }
-pub async fn update_repayment<'a>(conn: DbConn<'a>, args: UpdateRepaymentArgs) -> Result<Uuid> {
+pub async fn update_repayment<'a>(conn: DbConn<'a>, wallet: TaskWallet<'a>, args: UpdateRepaymentArgs) -> Result<Uuid> {
     use crate::schema::loanrepayments::table as lptable;
     let loan_data = get_loan(conn, args.loan_id).await?;
 
@@ -413,9 +413,11 @@ pub async fn update_repayment<'a>(conn: DbConn<'a>, args: UpdateRepaymentArgs) -
         .returning(crate::schema::loanrepayments::dsl::id)
         .get_result::<Uuid>(conn)?;
 
+    let position = get_loan_position(wallet, conn, args.loan_id).await?;
+
     let repaid_amount = get_repaid_amount(conn, args.loan_id).await?;
 
-    let remaining_amount = big_to_u64!(loan_data.principal_amount)? as i64
+    let remaining_amount = big_to_u64!(position.current_dept)? as i64
         - big_to_u64!(repaid_amount.repaid_amount)? as i64;
 
     let new_status = if remaining_amount <= 0 {
