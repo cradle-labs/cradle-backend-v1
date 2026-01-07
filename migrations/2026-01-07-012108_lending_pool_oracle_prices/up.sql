@@ -6,3 +6,7 @@ create table if not exists lending_pool_oracle_prices (
     price numeric not null,
     recorded_at timestamp not null default now()
 );
+
+-- up.sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lending_pool_asset 
+ON lending_pool_oracle_prices (lending_pool_id, asset_id);
