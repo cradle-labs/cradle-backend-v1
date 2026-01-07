@@ -44,7 +44,7 @@ pub async fn get_pools(
     )?;
 
     // Temporary for demo
-    let filtered = results.into_iter().filter(|v|v.id != Uuid::from_str("5583a3f1-7316-49b6-9491-b25762054381").unwrap()).collect::<Vec<LendingPoolRecord>>();
+    let filtered = results.into_iter().filter(|v|v.id != Uuid::from_str("594c6d07-4da6-4391-984f-1edf4ba4b64a").unwrap()).collect::<Vec<LendingPoolRecord>>();
 
 
     Ok((
