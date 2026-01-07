@@ -48,16 +48,16 @@ The backend is isolated from public internet traffic. Access is restricted using
 
 ```mermaid
 graph TD
-    subgraph Public Internet
+    subgraph Public_Internet ["Public Internet"]
         User[End User / Browser]
     end
 
-    subgraph Secure Perimeter (VPC/Cluster)
-        subgraph DMZ
+    subgraph Secure_Perimeter ["Secure Perimeter (VPC/Cluster)"]
+        subgraph DMZ_Zone ["DMZ"]
             Next[Next.js Frontend Server]
         end
 
-        subgraph Private Subnet
+        subgraph Private_Subnet ["Private Subnet"]
             Backend[Cradle Backend API]
             DB[(Postgres DB)]
         end
