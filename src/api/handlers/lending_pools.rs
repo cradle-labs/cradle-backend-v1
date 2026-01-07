@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use axum::{
     Json,
     extract::{Path, State},
@@ -41,11 +43,15 @@ pub async fn get_pools(
         "Failed to get lending pool"
     )?;
 
+    // Temporary for demo
+    let filtered = results.into_iter().filter(|v|v.id != Uuid::from_str("5583a3f1-7316-49b6-9491-b25762054381").unwrap()).collect::<Vec<LendingPoolRecord>>();
+
+
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
             success: true,
-            data: Some(results),
+            data: Some(filtered),
             error: None,
         }),
     ))
