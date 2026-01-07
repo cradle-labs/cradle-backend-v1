@@ -124,7 +124,7 @@ async fn get_accounts_handler(State(state): State<AppState>) -> Html<String> {
         // Filter where ca.account_type == Retail
         wa_dsl::cradlewalletaccounts
             .inner_join(ca_dsl::cradleaccounts.on(wa_dsl::cradle_account_id.eq(ca_dsl::id)))
-            .filter(ca_dsl::account_type.eq(CradleAccountType::Retail))
+            // .filter(ca_dsl::account_type.eq(CradleAccountType::Retail))
             .select(wa_dsl::cradlewalletaccounts::all_columns())
             .load::<CradleWalletAccountRecord>(&mut conn)
     }).await.unwrap();

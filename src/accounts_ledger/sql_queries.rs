@@ -22,16 +22,6 @@ SELECT
                     ELSE 0
                 END
             ), 0)
-            +
-            COALESCE(SUM(
-                CASE
-                    WHEN from_address = $1
-                     AND asset        = $2
-                     AND transaction_type = 'lend'
-                    THEN amount
-                    ELSE 0
-                END
-            ), 0)
             -
             COALESCE(SUM(
                 CASE
