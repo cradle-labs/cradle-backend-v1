@@ -3,10 +3,10 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use contract_integrator::utils::functions::asset_lending::{
+use contract_integrator::{operations::asset_lending::update_indices, utils::functions::asset_lending::{
     GetPoolStatsOutput, GetUserBorrowPosition, GetUserBorrowPositionOutput,
     GetUserDepositPositonOutput,
-};
+}};
 use diesel::prelude::*;
 use serde_json::json;
 
