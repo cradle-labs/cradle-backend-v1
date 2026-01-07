@@ -54,6 +54,7 @@ pub struct LiquidateLoan {
 pub enum RecordTransactionAssets {
     Single(Uuid),
     Borrow(BorrowAssets),
+    Repay(BorrowAssets),
     Deposit(Deposit),
     Withdraw(Withdraw),
     ListingPurchase(ListingPurchase),
@@ -78,6 +79,7 @@ pub fn record_transaction(
     let asset = match &assets {
         RecordTransactionAssets::Single(v) => v.clone(),
         RecordTransactionAssets::Borrow(v) => v.borrowed,
+        RecordTransactionAssets::Repay(v)=>v.borrowed,
         RecordTransactionAssets::Deposit(v) => v.deposited,
         RecordTransactionAssets::ListingPurchase(v) => v.purchased,
         RecordTransactionAssets::ListingSell(v) => v.sold,
@@ -93,6 +95,7 @@ pub fn record_transaction(
         RecordTransactionAssets::ListingSell(v) => v.received,
         RecordTransactionAssets::Withdraw(v) => v.yield_asset,
         RecordTransactionAssets::LiquidateLoan(v) => v.collateral,
+        RecordTransactionAssets::Repay(v)=>v.collateral
     };
 
     let amount = BigDecimal::from(amount.unwrap_or(0));
