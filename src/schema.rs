@@ -188,6 +188,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    lending_pool_oracle_prices (id) {
+        id -> Uuid,
+        lending_pool_id -> Uuid,
+        asset_id -> Uuid,
+        price -> Numeric,
+        recorded_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     lendingpool (id) {
         id -> Uuid,
         pool_address -> Text,
@@ -377,6 +387,8 @@ diesel::joinable!(cradlelistedcompanies -> cradlewalletaccounts (beneficiary_wal
 diesel::joinable!(cradlenativelistings -> cradlelistedcompanies (company));
 diesel::joinable!(cradlenativelistings -> cradlewalletaccounts (treasury));
 diesel::joinable!(cradlewalletaccounts -> cradleaccounts (cradle_account_id));
+diesel::joinable!(lending_pool_oracle_prices -> asset_book (asset_id));
+diesel::joinable!(lending_pool_oracle_prices -> lendingpool (lending_pool_id));
 diesel::joinable!(lendingpool -> cradleaccounts (pool_account_id));
 diesel::joinable!(lendingpoolsnapshots -> lendingpool (lending_pool_id));
 diesel::joinable!(loanliquidations -> cradlewalletaccounts (liquidator_wallet_id));
@@ -402,6 +414,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     cradlenativelistings,
     cradlewalletaccounts,
     kvstore,
+    lending_pool_oracle_prices,
     lendingpool,
     lendingpoolsnapshots,
     loanliquidations,
