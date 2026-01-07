@@ -55,7 +55,10 @@ pub fn get_deductions(
         .bind::<diesel::sql_types::Uuid, _>(asset)
         .get_result::<DeductionResult>(conn)?;
 
-    res.total = res.total.abs();
+    println!("Total {:?}", res.total.clone());
+
+    res.total = res.total.clone().max(BigDecimal::from(0));
+
 
     Ok(res)
 }
