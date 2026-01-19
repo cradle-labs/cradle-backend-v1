@@ -9,23 +9,36 @@ use std::sync::Arc;
 use uuid::Uuid;
 use bigdecimal::{BigDecimal, ToPrimitive};
 use std::str::FromStr;
+use chrono::{Duration, Local, NaiveDateTime};
 
 use cradle_back_end::utils::app_config::AppConfig;
 use cradle_back_end::accounts::db_types::{CradleWalletAccountRecord, CreateCradleAccount, CradleAccountType, CradleAccountStatus};
 use cradle_back_end::market::processor_enums::MarketProcessorInput;
-use cradle_back_end::market::db_types::MarketRecord;
+use cradle_back_end::market::db_types::{MarketRecord, MarketType, MarketStatus, MarketRegulation, CreateMarket};
 use cradle_back_end::action_router::{ActionRouterInput, ActionRouterOutput};
 use cradle_back_end::cli_helper::call_action_router;
 
+// Asset book
+use cradle_back_end::asset_book::db_types::AssetType;
+use cradle_back_end::asset_book::processor_enums::{
+    AssetBookProcessorInput, CreateNewAssetInputArgs, CreateExistingAssetInputArgs,
+};
+
+// Market time series
+use cradle_back_end::market_time_series::db_types::{CreateMarketTimeSeriesRecord, TimeSeriesInterval, DataProviderType};
+use cradle_back_end::market_time_series::processor_enum::MarketTimeSeriesProcessorInput;
+use cradle_back_end::order_book::db_types::OrderBookTradeRecord;
+
 // Ops for Faucet/OnRamp
 use cradle_back_end::ramper::{Ramper, OnRampRequest};
-use cradle_back_end::accounts::operations::{associate_token, kyc_token};
-use cradle_back_end::accounts::processor_enums::{AssociateTokenToWalletInputArgs, GrantKYCInputArgs};
+use cradle_back_end::accounts::operations::{associate_token, kyc_token, update_asset_book_record, AssetRecordAction};
+use cradle_back_end::accounts::processor_enums::{AssociateTokenToWalletInputArgs, GrantKYCInputArgs, AccountsProcessorInput};
+use contract_integrator::utils::functions::cradle_account::{AssociateTokenArgs, CradleAccountFunctionInput, CradleAccountFunctionOutput};
 use cradle_back_end::asset_book::operations::{get_asset, get_wallet, mint_asset};
 use contract_integrator::utils::functions::{
-    ContractCallInput,
-    asset_manager::{AirdropArgs, AssetManagerFunctionInput},
-    commons::{ContractFunctionProcessor, get_account_balances},
+    ContractCallInput, ContractCallOutput,
+    asset_manager::{AirdropArgs, AssetManagerFunctionInput, AssetManagerFunctionOutput},
+    commons::{self, ContractFunctionProcessor, get_account_balances},
 };
 
 // Lending pool ops
@@ -103,6 +116,29 @@ pub fn router(config: AppConfig) -> Router {
         // Oracle
         .route("/ui/tabs/oracle", get(oracle_tab_handler))
         .route("/ui/oracle/set_price", post(set_oracle_price_handler))
+        // Global Admin Tools (no account selection required)
+        .route("/ui/admin", get(admin_tools_handler))
+        .route("/ui/admin/tabs/assets", get(admin_assets_tab_handler))
+        .route("/ui/admin/tabs/markets", get(admin_markets_tab_handler))
+        .route("/ui/admin/tabs/aggregator", get(admin_aggregator_tab_handler))
+        .route("/ui/admin/tabs/accounts", get(admin_accounts_tab_handler))
+        // Asset management
+        .route("/ui/admin/assets/create_new_form", get(create_new_asset_form_handler))
+        .route("/ui/admin/assets/create_existing_form", get(create_existing_asset_form_handler))
+        .route("/ui/admin/assets/create_new", post(create_new_asset_handler))
+        .route("/ui/admin/assets/create_existing", post(create_existing_asset_handler))
+        // Market management
+        .route("/ui/admin/markets/create_form", get(create_market_form_handler))
+        .route("/ui/admin/markets/create", post(create_market_handler))
+        .route("/ui/admin/markets/update_status", post(update_market_status_handler))
+        // Aggregator
+        .route("/ui/admin/aggregator/run", post(run_aggregator_handler))
+        .route("/ui/admin/aggregator/run_batch", post(run_batch_aggregator_handler))
+        .route("/ui/admin/aggregator/markets", get(aggregator_markets_handler))
+        // Account Management (Associations & KYC)
+        .route("/ui/admin/accounts/associate", post(admin_associate_token_handler))
+        .route("/ui/admin/accounts/kyc", post(admin_grant_kyc_handler))
+        .route("/ui/admin/accounts/associate_and_kyc", post(admin_associate_and_kyc_handler))
         .with_state(state)
 }
 
@@ -529,91 +565,86 @@ async fn faucet_handler(
     }
 }
 
-// Re-add existing Place Order Handler
+// Place Order Handler - Amount In/Out Style
+// SEMANTICS (based on existing order_book implementation):
+//   ask_asset = what you GIVE (asset_in) - this gets LOCKED
+//   ask_amount = how much you GIVE (amount_in)
+//   bid_asset = what you WANT (asset_out) - what you're bidding for
+//   bid_amount = how much you WANT (amount_out)
+//   price = ask_amount / bid_amount = amount_in / amount_out
 #[derive(Deserialize, Debug)]
 struct PlaceOrderForm {
     account_id: Uuid,
     market_id: Uuid,
-    side: String,       // "buy" or "sell"
-    order_type: String, // "limit" or "market"
-    price: Option<String>,
-    amount: String,
+    asset_in: Uuid,       // Asset you're giving (maps to ask_asset)
+    asset_out: Uuid,      // Asset you're receiving (maps to bid_asset)
+    amount_in: String,    // Amount you're giving (maps to ask_amount)
+    amount_out: String,   // Amount you want to receive (maps to bid_amount)
+    order_type: String,   // "limit" or "market"
+    price: Option<String>, // Optional - for display/validation
 }
 
 async fn place_order_handler(
     State(state): State<AppState>,
     Form(form): Form<PlaceOrderForm>,
 ) -> Html<String> {
-    eprintln!("[DEBUG] Place order request: account_id={}, market_id={}, side={}, type={}, amount={}, price={:?}", 
-        form.account_id, form.market_id, form.side, form.order_type, form.amount, form.price);
-    
-    // Fetch Market
-    let input = MarketProcessorInput::GetMarket(form.market_id);
-    let router_input = ActionRouterInput::Markets(input);
-    let market_record = match call_action_router(router_input, (*state.config).clone()).await {
-        Ok(ActionRouterOutput::Markets(cradle_back_end::market::processor_enums::MarketProcessorOutput::GetMarket(m))) => m,
-        _ => return Html("<tr><td colspan='5' class='text-red-500'>Market not found</td></tr>".to_string())
-    };
+    eprintln!("[DEBUG] Place order request: account_id={}, market_id={}",
+        form.account_id, form.market_id);
+    eprintln!("[DEBUG] asset_in (giving/ask)={}, amount_in={}", form.asset_in, form.amount_in);
+    eprintln!("[DEBUG] asset_out (receiving/bid)={}, amount_out={}", form.asset_out, form.amount_out);
+    eprintln!("[DEBUG] order_type={}, price={:?}", form.order_type, form.price);
 
-    let (bid_asset_id, ask_asset_id) = if form.side == "sell" {
-        (market_record.asset_two, market_record.asset_one)
-    } else {
-        (market_record.asset_one, market_record.asset_two)
-    };
-    
     // Fetch asset records to get decimals
     use cradle_back_end::schema::asset_book::dsl as ab_dsl;
     use cradle_back_end::asset_book::db_types::AssetBookRecord;
     use diesel::prelude::*;
-    
+
     let pool = state.config.pool.clone();
-    let bid_asset_id_copy = bid_asset_id;
-    let ask_asset_id_copy = ask_asset_id;
-    
+    let asset_in_id = form.asset_in;   // What you give = ask_asset
+    let asset_out_id = form.asset_out; // What you want = bid_asset
+
     let assets_result = tokio::task::spawn_blocking(move || {
         let mut conn = pool.get().ok()?;
-        let bid_asset = ab_dsl::asset_book
-            .find(bid_asset_id_copy)
+        let asset_in = ab_dsl::asset_book
+            .find(asset_in_id)
             .first::<AssetBookRecord>(&mut conn)
             .ok()?;
-        let ask_asset = ab_dsl::asset_book
-            .find(ask_asset_id_copy)
+        let asset_out = ab_dsl::asset_book
+            .find(asset_out_id)
             .first::<AssetBookRecord>(&mut conn)
             .ok()?;
-        Some((bid_asset, ask_asset))
+        Some((asset_in, asset_out))
     }).await.unwrap();
-    
-    let (bid_asset, ask_asset) = match assets_result {
+
+    let (asset_in_record, asset_out_record) = match assets_result {
         Some(assets) => assets,
-        None => return Html("<tr><td colspan='5' class='text-red-500'>Failed to fetch asset details</td></tr>".to_string())
+        None => return Html("<div class='text-red-500'>Failed to fetch asset details</div>".to_string())
     };
-    
-    eprintln!("[DEBUG] Bid asset: {} (decimals: {}), Ask asset: {} (decimals: {})", 
-        bid_asset.symbol, bid_asset.decimals, ask_asset.symbol, ask_asset.decimals);
-    
-    let amount = BigDecimal::from_str(&form.amount).unwrap_or(BigDecimal::from(0));
-    let price = form.price.as_ref().map(|p| BigDecimal::from_str(p).unwrap_or(BigDecimal::from(0))).unwrap_or(BigDecimal::from(0));
-    
-    // Calculate bid and ask amounts with proper decimal scaling
-    // Price is in bid asset decimals
-    let bid_multiplier = BigDecimal::from(10i64.pow(bid_asset.decimals as u32));
-    let ask_multiplier = BigDecimal::from(10i64.pow(ask_asset.decimals as u32));
-    
-    let (bid_amt, ask_amt) = if form.side == "buy" {
-        // Buying: bid_amt = amount * price (both in bid decimals), ask_amt = amount (in ask decimals)
-        (
-            (amount.clone() * ask_multiplier),
-            (amount.clone() * price.clone() * bid_multiplier.clone())
-        )
-    } else {
-        // Selling: bid_amt = amount (in bid decimals), ask_amt = amount * price (price in bid decimals, convert to ask)
-        (
-            (amount.clone() * price.clone() * bid_multiplier.clone()),
-            (amount.clone() * ask_multiplier)
-        )
-    };
-    
-    eprintln!("[DEBUG] Calculated amounts - bid_amt: {}, ask_amt: {}", bid_amt, ask_amt);
+
+    eprintln!("[DEBUG] Asset In (giving): {} (decimals: {}), Asset Out (receiving): {} (decimals: {})",
+        asset_in_record.symbol, asset_in_record.decimals, asset_out_record.symbol, asset_out_record.decimals);
+
+    // Parse amounts from form (user enters in human-readable format)
+    let amount_in = BigDecimal::from_str(&form.amount_in).unwrap_or(BigDecimal::from(0));
+    let amount_out = BigDecimal::from_str(&form.amount_out).unwrap_or(BigDecimal::from(0));
+
+    if amount_in <= BigDecimal::from(0) || amount_out <= BigDecimal::from(0) {
+        return Html("<div class='text-red-500'>Amount In and Amount Out must be greater than 0</div>".to_string());
+    }
+
+    // Scale amounts by their respective decimals
+    // ask_amount = amount_in (scaled by asset_in decimals) - what you GIVE
+    // bid_amount = amount_out (scaled by asset_out decimals) - what you WANT
+    let ask_multiplier = BigDecimal::from(10i64.pow(asset_in_record.decimals as u32));
+    let bid_multiplier = BigDecimal::from(10i64.pow(asset_out_record.decimals as u32));
+
+    let ask_amt = amount_in.clone() * ask_multiplier;  // What you give
+    let bid_amt = amount_out.clone() * bid_multiplier; // What you want
+
+    // Calculate price as ask/bid ratio (amount_in / amount_out)
+    let price = &amount_in / &amount_out;
+
+    eprintln!("[DEBUG] Scaled amounts - ask_amt (giving): {}, bid_amt (wanting): {}, price: {}", ask_amt, bid_amt, price);
 
     use cradle_back_end::order_book::processor_enums::OrderBookProcessorInput;
     use cradle_back_end::order_book::db_types::{NewOrderBookRecord, OrderType as DbOrderType, FillMode};
@@ -623,31 +654,43 @@ async fn place_order_handler(
         _ => DbOrderType::Limit
     };
 
+    // IMPORTANT: Mapping from amount_in/out to order book fields:
+    // bid_asset = what you WANT to receive = asset_out
+    // bid_amount = how much you WANT = amount_out (scaled)
+    // ask_asset = what you GIVE = asset_in (this gets LOCKED)
+    // ask_amount = how much you GIVE = amount_in (scaled)
     let new_order = NewOrderBookRecord {
         wallet: form.account_id,
         market_id: form.market_id,
-        bid_asset: bid_asset_id,
-        ask_asset: ask_asset_id,
-        bid_amount: bid_amt,
-        ask_amount: ask_amt,
+        bid_asset: form.asset_out,  // What you WANT (bidding for)
+        ask_asset: form.asset_in,   // What you GIVE (asking in exchange)
+        bid_amount: bid_amt,        // How much you want
+        ask_amount: ask_amt,        // How much you're giving
         price: price,
         mode: Some(FillMode::GoodTillCancel),
         expires_at: None,
         order_type: Some(o_type)
     };
-    
+
     let input = OrderBookProcessorInput::PlaceOrder(new_order);
     let router_input = ActionRouterInput::OrderBook(input);
-    
+
     eprintln!("[DEBUG] Submitting order to action router");
     match call_action_router(router_input, (*state.config).clone()).await {
         Ok(_) => {
             eprintln!("[DEBUG] Order submitted successfully");
-            Html(r#"<tr class="bg-green-900/40"><td colspan="5" class="p-3 text-center text-green-300">Order Submitted! Refreshing...</td></tr>"#.to_string())
+            Html(format!(
+                r#"<div class="bg-green-800 p-3 rounded text-green-200 text-sm">
+                    Order Submitted!<br>
+                    Giving: {} {}<br>
+                    Receiving: {} {}
+                </div>"#,
+                form.amount_in, asset_in_record.symbol, form.amount_out, asset_out_record.symbol
+            ))
         },
         Err(e) => {
             eprintln!("[ERROR] Order submission failed: {:?}", e);
-            Html(format!(r#"<tr class="bg-red-900/40"><td colspan="5" class="p-3 text-center text-red-300">Error: {}</td></tr>"#, e))
+            Html(format!(r#"<div class="bg-red-800 p-3 rounded text-red-200 text-sm">Error: {}</div>"#, e))
         }
     }
 }
@@ -1624,5 +1667,1100 @@ async fn set_oracle_price_handler(
             eprintln!("[ORACLE] Price publication failed: {:?}", e);
             Html(format!("<div class='text-red-400'>Failed to update oracle price: {}</div>", e))
         }
+    }
+}
+
+// ============================================================================
+// GLOBAL ADMIN TOOLS (No account selection required)
+// ============================================================================
+
+async fn admin_tools_handler() -> Html<String> {
+    Html(templates::admin_tools_page())
+}
+
+async fn admin_assets_tab_handler(State(state): State<AppState>) -> Html<String> {
+    use diesel::prelude::*;
+    use cradle_back_end::schema::asset_book::dsl::*;
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+
+    let pool = state.config.pool.clone();
+    eprintln!("[ADMIN] Fetching all assets");
+
+    let assets_result = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().expect("Failed to get db connection");
+        asset_book.load::<AssetBookRecord>(&mut conn)
+    }).await.unwrap();
+
+    let assets_list = assets_result.unwrap_or_default();
+    Html(templates::admin_assets_tab(assets_list))
+}
+
+async fn admin_markets_tab_handler(State(state): State<AppState>) -> Html<String> {
+    use diesel::prelude::*;
+    use cradle_back_end::schema::markets::dsl::*;
+    use cradle_back_end::schema::asset_book::dsl as ab_dsl;
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+
+    let pool = state.config.pool.clone();
+    eprintln!("[ADMIN] Fetching all markets and assets");
+
+    let (markets_list, assets_list) = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().expect("Failed to get db connection");
+        let m = markets.load::<MarketRecord>(&mut conn).unwrap_or_default();
+        let a = ab_dsl::asset_book.load::<AssetBookRecord>(&mut conn).unwrap_or_default();
+        (m, a)
+    }).await.unwrap();
+
+    Html(templates::admin_markets_tab(markets_list, assets_list))
+}
+
+async fn admin_aggregator_tab_handler(State(state): State<AppState>) -> Html<String> {
+    use diesel::prelude::*;
+    use cradle_back_end::schema::markets::dsl::*;
+    use cradle_back_end::schema::asset_book::dsl as ab_dsl;
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+
+    let pool = state.config.pool.clone();
+    eprintln!("[ADMIN] Fetching markets for aggregator");
+
+    let (markets_list, assets_list) = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().expect("Failed to get db connection");
+        let m = markets.load::<MarketRecord>(&mut conn).unwrap_or_default();
+        let a = ab_dsl::asset_book.load::<AssetBookRecord>(&mut conn).unwrap_or_default();
+        (m, a)
+    }).await.unwrap();
+
+    Html(templates::admin_aggregator_tab(markets_list, assets_list))
+}
+
+// Asset Form Handlers
+async fn create_new_asset_form_handler() -> Html<String> {
+    Html(templates::create_new_asset_form())
+}
+
+async fn create_existing_asset_form_handler() -> Html<String> {
+    Html(templates::create_existing_asset_form())
+}
+
+// Asset Creation Form Structs
+#[derive(Deserialize)]
+struct CreateNewAssetForm {
+    name: String,
+    symbol: String,
+    decimals: i32,
+    asset_type: String,
+    icon: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateExistingAssetForm {
+    token: String,
+    asset_manager: Option<String>,
+    name: String,
+    symbol: String,
+    decimals: i32,
+    asset_type: String,
+    icon: Option<String>,
+}
+
+async fn create_new_asset_handler(
+    State(state): State<AppState>,
+    Form(form): Form<CreateNewAssetForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Creating new asset: name={}, symbol={}, decimals={}",
+        form.name, form.symbol, form.decimals);
+
+    let asset_type = match form.asset_type.as_str() {
+        "bridged" => AssetType::Bridged,
+        "native" => AssetType::Native,
+        "yield_bearing" => AssetType::YieldBearing,
+        "chain_native" => AssetType::ChainNative,
+        "stablecoin" => AssetType::StableCoin,
+        "volatile" => AssetType::Volatile,
+        _ => AssetType::Native,
+    };
+
+    let input = AssetBookProcessorInput::CreateNewAsset(CreateNewAssetInputArgs {
+        asset_type,
+        name: form.name.clone(),
+        symbol: form.symbol.clone(),
+        decimals: form.decimals,
+        icon: form.icon.unwrap_or_default(),
+    });
+
+    match call_action_router(ActionRouterInput::AssetBook(input), (*state.config).clone()).await {
+        Ok(ActionRouterOutput::AssetBook(cradle_back_end::asset_book::processor_enums::AssetBookProcessorOutput::CreateNewAsset(id))) => {
+            eprintln!("[ADMIN] Asset created successfully: {}", id);
+            Html(format!("<div class='bg-green-800 p-4 rounded text-green-200'>Asset created successfully!<br>ID: {}</div>", id))
+        },
+        Ok(_) => Html("<div class='text-red-400'>Unexpected response format</div>".to_string()),
+        Err(e) => {
+            eprintln!("[ADMIN] Asset creation failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>Asset creation failed: {}</div>", e))
+        }
+    }
+}
+
+async fn create_existing_asset_handler(
+    State(state): State<AppState>,
+    Form(form): Form<CreateExistingAssetForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Registering existing asset: token={}, name={}, symbol={}",
+        form.token, form.name, form.symbol);
+
+    let asset_type = match form.asset_type.as_str() {
+        "bridged" => AssetType::Bridged,
+        "native" => AssetType::Native,
+        "yield_bearing" => AssetType::YieldBearing,
+        "chain_native" => AssetType::ChainNative,
+        "stablecoin" => AssetType::StableCoin,
+        "volatile" => AssetType::Volatile,
+        _ => AssetType::Native,
+    };
+
+    let input = AssetBookProcessorInput::CreateExistingAsset(CreateExistingAssetInputArgs {
+        asset_manager: form.asset_manager,
+        token: form.token.clone(),
+        asset_type,
+        name: form.name.clone(),
+        symbol: form.symbol.clone(),
+        decimals: form.decimals,
+        icon: form.icon.unwrap_or_default(),
+    });
+
+    match call_action_router(ActionRouterInput::AssetBook(input), (*state.config).clone()).await {
+        Ok(ActionRouterOutput::AssetBook(cradle_back_end::asset_book::processor_enums::AssetBookProcessorOutput::CreateExistingAsset(id))) => {
+            eprintln!("[ADMIN] Existing asset registered successfully: {}", id);
+            Html(format!("<div class='bg-green-800 p-4 rounded text-green-200'>Asset registered successfully!<br>ID: {}</div>", id))
+        },
+        Ok(_) => Html("<div class='text-red-400'>Unexpected response format</div>".to_string()),
+        Err(e) => {
+            eprintln!("[ADMIN] Existing asset registration failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>Asset registration failed: {}</div>", e))
+        }
+    }
+}
+
+// Market Form Handlers
+async fn create_market_form_handler(State(state): State<AppState>) -> Html<String> {
+    use diesel::prelude::*;
+    use cradle_back_end::schema::asset_book::dsl::*;
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+
+    let pool = state.config.pool.clone();
+    let assets_list = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().expect("Failed to get db connection");
+        asset_book.load::<AssetBookRecord>(&mut conn).unwrap_or_default()
+    }).await.unwrap();
+
+    Html(templates::create_market_form(assets_list))
+}
+
+#[derive(Deserialize)]
+struct CreateMarketForm {
+    name: String,
+    description: Option<String>,
+    asset_one: Uuid,
+    asset_two: Uuid,
+    market_type: String,
+    market_regulation: String,
+}
+
+async fn create_market_handler(
+    State(state): State<AppState>,
+    Form(form): Form<CreateMarketForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Creating market: name={}, asset_one={}, asset_two={}",
+        form.name, form.asset_one, form.asset_two);
+
+    let market_type = match form.market_type.as_str() {
+        "spot" => MarketType::Spot,
+        "derivative" => MarketType::Derivative,
+        "futures" => MarketType::Futures,
+        _ => MarketType::Spot,
+    };
+
+    let market_regulation = match form.market_regulation.as_str() {
+        "regulated" => MarketRegulation::Regulated,
+        "unregulated" => MarketRegulation::Unregulated,
+        _ => MarketRegulation::Unregulated,
+    };
+
+    let create_input = CreateMarket {
+        name: form.name.clone(),
+        description: form.description,
+        icon: None,
+        asset_one: form.asset_one,
+        asset_two: form.asset_two,
+        market_type: Some(market_type),
+        market_status: Some(MarketStatus::Active),
+        market_regulation: Some(market_regulation),
+    };
+
+    let input = MarketProcessorInput::CreateMarket(create_input);
+
+    match call_action_router(ActionRouterInput::Markets(input), (*state.config).clone()).await {
+        Ok(ActionRouterOutput::Markets(cradle_back_end::market::processor_enums::MarketProcessorOutput::CreateMarket(id))) => {
+            eprintln!("[ADMIN] Market created successfully: {}", id);
+            Html(format!("<div class='bg-green-800 p-4 rounded text-green-200'>Market created successfully!<br>ID: {}</div>", id))
+        },
+        Ok(_) => Html("<div class='text-red-400'>Unexpected response format</div>".to_string()),
+        Err(e) => {
+            eprintln!("[ADMIN] Market creation failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>Market creation failed: {}</div>", e))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateMarketStatusForm {
+    market_id: Uuid,
+    status: String,
+}
+
+async fn update_market_status_handler(
+    State(state): State<AppState>,
+    Form(form): Form<UpdateMarketStatusForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Updating market status: market_id={}, status={}",
+        form.market_id, form.status);
+
+    let status = match form.status.as_str() {
+        "active" => MarketStatus::Active,
+        "inactive" => MarketStatus::InActive,
+        "suspended" => MarketStatus::Suspended,
+        _ => MarketStatus::Active,
+    };
+
+    use cradle_back_end::market::processor_enums::UpdateMarketStatusInputArgs;
+    let input = MarketProcessorInput::UpdateMarketStatus(UpdateMarketStatusInputArgs {
+        market_id: form.market_id,
+        status,
+    });
+
+    match call_action_router(ActionRouterInput::Markets(input), (*state.config).clone()).await {
+        Ok(_) => {
+            eprintln!("[ADMIN] Market status updated successfully");
+            Html("<div class='bg-green-800 p-4 rounded text-green-200'>Market status updated successfully!</div>".to_string())
+        },
+        Err(e) => {
+            eprintln!("[ADMIN] Market status update failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>Status update failed: {}</div>", e))
+        }
+    }
+}
+
+// Aggregator Handlers
+#[derive(Deserialize)]
+struct RunAggregatorForm {
+    market_id: Uuid,
+    asset_id: Uuid,
+    interval: String,
+    duration: String,
+}
+
+async fn aggregator_markets_handler(State(state): State<AppState>) -> Html<String> {
+    use diesel::prelude::*;
+    use cradle_back_end::schema::markets::dsl::*;
+
+    let pool = state.config.pool.clone();
+    let markets_list = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().expect("Failed to get db connection");
+        markets.load::<MarketRecord>(&mut conn).unwrap_or_default()
+    }).await.unwrap();
+
+    // Build a simple JSON-like response with market assets
+    let mut options = String::new();
+    for m in markets_list {
+        options.push_str(&format!(
+            r##"<option value="{}" data-asset-one="{}" data-asset-two="{}">{}</option>"##,
+            m.id, m.asset_one, m.asset_two, m.name
+        ));
+    }
+    Html(options)
+}
+
+async fn run_aggregator_handler(
+    State(state): State<AppState>,
+    Form(form): Form<RunAggregatorForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Running aggregator: market={}, asset={}, interval={}, duration={}",
+        form.market_id, form.asset_id, form.interval, form.duration);
+
+    use diesel::prelude::*;
+    use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, JoinOnDsl, BoolExpressionMethods};
+    use cradle_back_end::schema::orderbooktrades;
+    use cradle_back_end::schema::orderbook;
+
+    let pool_clone = state.config.pool.clone();
+
+    // Parse interval
+    let interval_enum = match form.interval.as_str() {
+        "15secs" => TimeSeriesInterval::FifteenSecs,
+        "30secs" => TimeSeriesInterval::ThirtySecs,
+        "45secs" => TimeSeriesInterval::FortyFiveSecs,
+        "1min" => TimeSeriesInterval::OneMinute,
+        "5min" => TimeSeriesInterval::FiveMinutes,
+        "15min" => TimeSeriesInterval::FifteenMinutes,
+        "30min" => TimeSeriesInterval::ThirtyMinutes,
+        "1hr" => TimeSeriesInterval::OneHour,
+        "4hr" => TimeSeriesInterval::FourHours,
+        "1day" => TimeSeriesInterval::OneDay,
+        "1week" => TimeSeriesInterval::OneWeek,
+        _ => TimeSeriesInterval::FifteenMinutes,
+    };
+
+    let interval_duration = match form.interval.as_str() {
+        "15secs" => Duration::seconds(15),
+        "30secs" => Duration::seconds(30),
+        "45secs" => Duration::seconds(45),
+        "1min" => Duration::minutes(1),
+        "5min" => Duration::minutes(5),
+        "15min" => Duration::minutes(15),
+        "30min" => Duration::minutes(30),
+        "1hr" => Duration::hours(1),
+        "4hr" => Duration::hours(4),
+        "1day" => Duration::days(1),
+        "1week" => Duration::weeks(1),
+        _ => Duration::minutes(15),
+    };
+
+    // Parse duration
+    let now = Local::now().naive_local();
+    let start_time = match form.duration.as_str() {
+        "24h" => now - Duration::days(1),
+        "7d" => now - Duration::days(7),
+        "30d" => now - Duration::days(30),
+        "90d" => now - Duration::days(90),
+        "all" => now - Duration::days(36500), // ~100 years
+        _ => now - Duration::days(7),
+    };
+    let end_time = now;
+
+    let market_id = form.market_id;
+    let asset_id = form.asset_id;
+
+    // Query trades
+    let trades_result = tokio::task::spawn_blocking(move || {
+        let mut conn = pool_clone.get().ok()?;
+        orderbooktrades::table
+            .inner_join(orderbook::table.on(
+                orderbooktrades::maker_order_id.eq(orderbook::id)
+            ))
+            .filter(
+                orderbook::market_id.eq(market_id)
+                    .and(orderbooktrades::created_at.ge(start_time))
+                    .and(orderbooktrades::created_at.le(end_time))
+            )
+            .select(orderbooktrades::all_columns)
+            .order_by(orderbooktrades::created_at.asc())
+            .load::<OrderBookTradeRecord>(&mut conn)
+            .ok()
+    }).await.unwrap();
+
+    let trades = match trades_result {
+        Some(t) => t,
+        None => return Html("<div class='text-red-400'>Failed to query trades</div>".to_string())
+    };
+
+    if trades.is_empty() {
+        return Html("<div class='text-yellow-400'>No trades found for the specified time range</div>".to_string());
+    }
+
+    eprintln!("[ADMIN] Found {} trades to aggregate", trades.len());
+
+    // Calculate OHLC bars
+    let bars = calculate_ohlc_bars_for_admin(&trades, start_time, end_time, interval_duration);
+
+    let mut bar_count = 0;
+    let mut errors = 0;
+
+    for (bar_start, bar_end, bar) in bars {
+        let create_input = CreateMarketTimeSeriesRecord {
+            market_id,
+            asset: asset_id,
+            open: bar.open.clone(),
+            high: bar.high.clone(),
+            low: bar.low.clone(),
+            close: bar.close.clone(),
+            volume: bar.volume.clone(),
+            start_time: bar_start,
+            end_time: bar_end,
+            interval: Some(interval_enum.clone()),
+            data_provider_type: Some(DataProviderType::OrderBook),
+            data_provider: None,
+        };
+
+        let input = MarketTimeSeriesProcessorInput::AddRecord(create_input);
+        let router_input = ActionRouterInput::MarketTimeSeries(input);
+
+        match call_action_router(router_input, (*state.config).clone()).await {
+            Ok(_) => bar_count += 1,
+            Err(e) => {
+                eprintln!("[ADMIN] Failed to create OHLC record: {:?}", e);
+                errors += 1;
+            }
+        }
+    }
+
+    eprintln!("[ADMIN] Aggregation complete: {} bars created, {} errors", bar_count, errors);
+
+    if errors > 0 {
+        Html(format!(
+            "<div class='bg-yellow-800 p-4 rounded text-yellow-200'>Aggregation completed with warnings<br>Bars created: {}<br>Errors: {}</div>",
+            bar_count, errors
+        ))
+    } else {
+        Html(format!(
+            "<div class='bg-green-800 p-4 rounded text-green-200'>Aggregation completed successfully!<br>Bars created: {}</div>",
+            bar_count
+        ))
+    }
+}
+
+// Batch Aggregator Form
+#[derive(Deserialize)]
+struct RunBatchAggregatorForm {
+    market_id: Uuid,
+}
+
+async fn run_batch_aggregator_handler(
+    State(state): State<AppState>,
+    Form(form): Form<RunBatchAggregatorForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Running BATCH aggregator for market={}", form.market_id);
+
+    use diesel::prelude::*;
+    use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl, JoinOnDsl, BoolExpressionMethods};
+    use cradle_back_end::schema::orderbooktrades;
+    use cradle_back_end::schema::orderbook;
+    use cradle_back_end::schema::markets::dsl as markets_dsl;
+
+    let pool = state.config.pool.clone();
+    let market_id = form.market_id;
+
+    // Get market info to get both assets
+    let market_result = {
+        let pool_clone = pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = pool_clone.get().ok()?;
+            markets_dsl::markets.find(market_id).first::<MarketRecord>(&mut conn).ok()
+        }).await.unwrap()
+    };
+
+    let market = match market_result {
+        Some(m) => m,
+        None => return Html("<div class='text-red-400'>Market not found</div>".to_string())
+    };
+
+    let assets = vec![market.asset_one, market.asset_two];
+    let now = Local::now().naive_local();
+
+    // Define batch configurations: (duration_name, start_time, intervals)
+    let batch_configs: Vec<(&str, NaiveDateTime, Vec<(&str, TimeSeriesInterval, Duration)>)> = vec![
+        (
+            "24 Hours",
+            now - Duration::days(1),
+            vec![
+                ("15secs", TimeSeriesInterval::FifteenSecs, Duration::seconds(15)),
+                ("30secs", TimeSeriesInterval::ThirtySecs, Duration::seconds(30)),
+                ("45secs", TimeSeriesInterval::FortyFiveSecs, Duration::seconds(45)),
+                ("1min", TimeSeriesInterval::OneMinute, Duration::minutes(1)),
+                ("15min", TimeSeriesInterval::FifteenMinutes, Duration::minutes(15)),
+                ("30min", TimeSeriesInterval::ThirtyMinutes, Duration::minutes(30)),
+                ("1hr", TimeSeriesInterval::OneHour, Duration::hours(1)),
+                ("4hr", TimeSeriesInterval::FourHours, Duration::hours(4)),
+            ]
+        ),
+        (
+            "7 Days",
+            now - Duration::days(7),
+            vec![
+                ("1day", TimeSeriesInterval::OneDay, Duration::days(1)),
+            ]
+        ),
+        (
+            "30 Days",
+            now - Duration::days(30),
+            vec![
+                ("1week", TimeSeriesInterval::OneWeek, Duration::weeks(1)),
+            ]
+        ),
+    ];
+
+    let mut results: Vec<String> = Vec::new();
+    let mut total_bars = 0;
+    let mut total_errors = 0;
+
+    // Query all trades for the market once (for the longest duration - 30 days)
+    let all_start_time = now - Duration::days(30);
+    let pool_clone = pool.clone();
+    let trades_result = tokio::task::spawn_blocking(move || {
+        let mut conn = pool_clone.get().ok()?;
+        orderbooktrades::table
+            .inner_join(orderbook::table.on(
+                orderbooktrades::maker_order_id.eq(orderbook::id)
+            ))
+            .filter(
+                orderbook::market_id.eq(market_id)
+                    .and(orderbooktrades::created_at.ge(all_start_time))
+                    .and(orderbooktrades::created_at.le(now))
+            )
+            .select(orderbooktrades::all_columns)
+            .order_by(orderbooktrades::created_at.asc())
+            .load::<OrderBookTradeRecord>(&mut conn)
+            .ok()
+    }).await.unwrap();
+
+    let all_trades = match trades_result {
+        Some(t) => t,
+        None => return Html("<div class='text-red-400'>Failed to query trades</div>".to_string())
+    };
+
+    if all_trades.is_empty() {
+        return Html("<div class='text-yellow-400'>No trades found for this market in the last 30 days</div>".to_string());
+    }
+
+    eprintln!("[ADMIN] Found {} total trades for batch processing", all_trades.len());
+
+    // Process each batch configuration
+    for (duration_name, start_time, intervals) in batch_configs {
+        // Filter trades for this duration
+        let duration_trades: Vec<&OrderBookTradeRecord> = all_trades
+            .iter()
+            .filter(|t| t.created_at >= start_time && t.created_at <= now)
+            .collect();
+
+        if duration_trades.is_empty() {
+            results.push(format!("<div class='text-gray-400'>⊘ {} - No trades</div>", duration_name));
+            continue;
+        }
+
+        for (interval_name, interval_enum, interval_duration) in &intervals {
+            // Process each asset
+            for asset_id in &assets {
+                // Calculate OHLC bars
+                let trades_refs: Vec<&OrderBookTradeRecord> = duration_trades.iter().copied().collect();
+                let owned_trades: Vec<OrderBookTradeRecord> = trades_refs.into_iter().cloned().collect();
+                let bars = calculate_ohlc_bars_for_admin(&owned_trades, start_time, now, *interval_duration);
+
+                let mut bar_count = 0;
+                let mut errors = 0;
+
+                for (bar_start, bar_end, bar) in bars {
+                    let create_input = CreateMarketTimeSeriesRecord {
+                        market_id,
+                        asset: *asset_id,
+                        open: bar.open.clone(),
+                        high: bar.high.clone(),
+                        low: bar.low.clone(),
+                        close: bar.close.clone(),
+                        volume: bar.volume.clone(),
+                        start_time: bar_start,
+                        end_time: bar_end,
+                        interval: Some(interval_enum.clone()),
+                        data_provider_type: Some(DataProviderType::OrderBook),
+                        data_provider: None,
+                    };
+
+                    let input = MarketTimeSeriesProcessorInput::AddRecord(create_input);
+                    let router_input = ActionRouterInput::MarketTimeSeries(input);
+
+                    match call_action_router(router_input, (*state.config).clone()).await {
+                        Ok(_) => bar_count += 1,
+                        Err(e) => {
+                            eprintln!("[ADMIN] Failed to create OHLC record: {:?}", e);
+                            errors += 1;
+                        }
+                    }
+                }
+
+                total_bars += bar_count;
+                total_errors += errors;
+
+                let status = if errors > 0 { "⚠" } else { "✓" };
+                results.push(format!(
+                    "<div class='text-sm'>{} {} / {} / Asset {} - {} bars</div>",
+                    status, duration_name, interval_name,
+                    asset_id.to_string().split('-').next().unwrap_or(""),
+                    bar_count
+                ));
+            }
+        }
+    }
+
+    eprintln!("[ADMIN] Batch aggregation complete: {} total bars, {} errors", total_bars, total_errors);
+
+    let results_html = results.join("\n");
+    let status_class = if total_errors > 0 { "bg-yellow-800 text-yellow-200" } else { "bg-green-800 text-green-200" };
+
+    Html(format!(
+        r##"<div class='{} p-4 rounded'>
+            <div class='font-bold mb-2'>Batch Aggregation Complete</div>
+            <div class='text-sm mb-2'>Total bars: {} | Errors: {}</div>
+            <div class='border-t border-current/30 pt-2 mt-2 space-y-1 max-h-64 overflow-y-auto'>
+                {}
+            </div>
+        </div>"##,
+        status_class, total_bars, total_errors, results_html
+    ))
+}
+
+// Helper struct for OHLC calculation
+#[derive(Clone, Debug)]
+struct OhlcBarAdmin {
+    pub open: BigDecimal,
+    pub high: BigDecimal,
+    pub low: BigDecimal,
+    pub close: BigDecimal,
+    pub volume: BigDecimal,
+}
+
+fn calculate_ohlc_bars_for_admin(
+    trades: &[OrderBookTradeRecord],
+    start_time: NaiveDateTime,
+    _end_time: NaiveDateTime,
+    interval: Duration,
+) -> Vec<(NaiveDateTime, NaiveDateTime, OhlcBarAdmin)> {
+    if trades.is_empty() {
+        return Vec::new();
+    }
+
+    let mut bars = Vec::new();
+    let mut current_bucket_start = start_time;
+    let mut current_bucket_trades: Vec<&OrderBookTradeRecord> = Vec::new();
+
+    for trade in trades {
+        let bucket_start = current_bucket_start;
+        let bucket_end = bucket_start + interval;
+
+        if trade.created_at >= bucket_start && trade.created_at < bucket_end {
+            current_bucket_trades.push(trade);
+        } else {
+            if !current_bucket_trades.is_empty() {
+                let bar = aggregate_trades_to_ohlc_admin(&current_bucket_trades);
+                bars.push((bucket_start, bucket_end, bar));
+            }
+
+            while trade.created_at >= current_bucket_start + interval {
+                current_bucket_start = current_bucket_start + interval;
+            }
+            current_bucket_trades = vec![trade];
+        }
+    }
+
+    if !current_bucket_trades.is_empty() {
+        let bucket_start = current_bucket_start;
+        let bucket_end = bucket_start + interval;
+        let bar = aggregate_trades_to_ohlc_admin(&current_bucket_trades);
+        bars.push((bucket_start, bucket_end, bar));
+    }
+
+    bars
+}
+
+fn aggregate_trades_to_ohlc_admin(trades: &[&OrderBookTradeRecord]) -> OhlcBarAdmin {
+    if trades.is_empty() {
+        return OhlcBarAdmin {
+            open: BigDecimal::from(0),
+            high: BigDecimal::from(0),
+            low: BigDecimal::from(0),
+            close: BigDecimal::from(0),
+            volume: BigDecimal::from(0),
+        };
+    }
+
+    let mut prices = Vec::new();
+    let mut volume = BigDecimal::from(0);
+
+    for trade in trades {
+        let price = if trade.maker_filled_amount != BigDecimal::from(0) {
+            &trade.taker_filled_amount / &trade.maker_filled_amount
+        } else {
+            BigDecimal::from(0)
+        };
+        prices.push(price);
+        volume = volume + &trade.maker_filled_amount + &trade.taker_filled_amount;
+    }
+
+    let open = prices[0].clone();
+    let close = prices[prices.len() - 1].clone();
+    let high = prices.iter().max().cloned().unwrap_or_else(|| BigDecimal::from(0));
+    let low = prices.iter().min().cloned().unwrap_or_else(|| BigDecimal::from(0));
+
+    OhlcBarAdmin {
+        open,
+        high,
+        low,
+        close,
+        volume,
+    }
+}
+
+// =============================================================================
+// ADMIN ACCOUNTS TAB - Associations & KYC
+// =============================================================================
+
+async fn admin_accounts_tab_handler(State(state): State<AppState>) -> Html<String> {
+    use diesel::prelude::*;
+    use cradle_back_end::schema::asset_book::dsl::*;
+    use cradle_back_end::schema::cradlewalletaccounts::dsl as wa_dsl;
+    use cradle_back_end::asset_book::db_types::AssetBookRecord;
+
+    let pool = state.config.pool.clone();
+    let (assets_list, wallets_list) = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get().expect("Failed to get db connection");
+        let assets = asset_book.load::<AssetBookRecord>(&mut conn).unwrap_or_default();
+        let wallets = wa_dsl::cradlewalletaccounts.load::<CradleWalletAccountRecord>(&mut conn).unwrap_or_default();
+        (assets, wallets)
+    }).await.unwrap();
+
+    Html(templates::admin_accounts_tab(assets_list, wallets_list))
+}
+
+// Form structs for association/KYC
+#[derive(Deserialize, Debug)]
+struct AdminAssociateForm {
+    wallet_id: Option<Uuid>,       // If selecting from DB
+    custom_address: Option<String>, // If entering custom address
+    token_id: Uuid,
+}
+
+#[derive(Deserialize, Debug)]
+struct AdminKycForm {
+    wallet_id: Option<Uuid>,       // If selecting from DB
+    custom_address: Option<String>, // If entering custom address
+    token_id: Uuid,
+}
+
+#[derive(Deserialize, Debug)]
+struct AdminAssociateAndKycForm {
+    wallet_id: Option<Uuid>,
+    custom_address: Option<String>,
+    token_id: Uuid,
+}
+
+async fn admin_associate_token_handler(
+    State(state): State<AppState>,
+    Form(form): Form<AdminAssociateForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Associate token request: wallet_id={:?}, custom_address={:?}, token={}",
+        form.wallet_id, form.custom_address, form.token_id);
+
+    let pool = state.config.pool.clone();
+    let mut action_wallet = state.config.wallet.clone();
+
+    // Get the token info
+    let token_result = {
+        let pool_clone = pool.clone();
+        let token_id = form.token_id;
+        tokio::task::spawn_blocking(move || {
+            use diesel::prelude::*;
+            use cradle_back_end::schema::asset_book::dsl::*;
+            use cradle_back_end::asset_book::db_types::AssetBookRecord;
+            let mut conn = pool_clone.get().ok()?;
+            asset_book.find(token_id).first::<AssetBookRecord>(&mut conn).ok()
+        }).await.unwrap()
+    };
+
+    let token = match token_result {
+        Some(t) => t,
+        None => return Html("<div class='text-red-400'>Token not found</div>".to_string())
+    };
+
+    // Determine the address and contract_id to use
+    let (wallet_address, contract_id, wallet_db_id) = if let Some(wallet_id) = form.wallet_id {
+        // Using existing wallet from DB
+        let pool_clone = pool.clone();
+        let w_id = wallet_id;
+        let wallet_data = tokio::task::spawn_blocking(move || {
+            use diesel::prelude::*;
+            use cradle_back_end::schema::cradlewalletaccounts::dsl::*;
+            let mut conn = pool_clone.get().ok()?;
+            cradlewalletaccounts.find(w_id).first::<CradleWalletAccountRecord>(&mut conn).ok()
+        }).await.unwrap();
+
+        match wallet_data {
+            Some(w) => (w.address.clone(), w.contract_id.clone(), Some(w.id)),
+            None => return Html("<div class='text-red-400'>Wallet not found in database</div>".to_string())
+        }
+    } else if let Some(addr) = form.custom_address.filter(|s| !s.is_empty()) {
+        // Using custom address - derive contract_id
+        match commons::get_contract_id_from_evm_address(&addr).await {
+            Ok(cid) => (addr, cid.to_string(), None),
+            Err(e) => return Html(format!("<div class='text-red-400'>Failed to derive contract ID from address: {}</div>", e))
+        }
+    } else {
+        return Html("<div class='text-red-400'>Please select a wallet or enter a custom address</div>".to_string())
+    };
+
+    eprintln!("[ADMIN] Associating token {} to address {} (contract_id: {})",
+        token.symbol, wallet_address, contract_id);
+
+    // Call the smart contract to associate the token
+    let res = action_wallet
+        .execute(ContractCallInput::CradleAccount(
+            CradleAccountFunctionInput::AssociateToken(AssociateTokenArgs {
+                token: token.token.clone(),
+                account_contract_id: contract_id,
+            }),
+        ))
+        .await;
+
+    match res {
+        Ok(ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::AssociateToken(v))) => {
+            eprintln!("[ADMIN] Association tx: {:?}", v.transaction_id);
+
+            // Update DB record if we have a wallet_db_id
+            if let Some(db_id) = wallet_db_id {
+                let pool_clone = pool.clone();
+                let token_id = token.id;
+                let _ = tokio::task::spawn_blocking(move || {
+                    let mut conn = pool_clone.get().ok()?;
+                    tokio::runtime::Handle::current().block_on(async {
+                        update_asset_book_record(&mut conn, db_id, token_id, AssetRecordAction::Associate).await.ok()
+                    })
+                }).await;
+            }
+
+            Html(format!(
+                "<div class='bg-green-800 p-4 rounded text-green-200'>Token associated successfully!<br>TX: {}</div>",
+                v.transaction_id
+            ))
+        },
+        Ok(_) => Html("<div class='text-red-400'>Unexpected response format</div>".to_string()),
+        Err(e) => {
+            eprintln!("[ADMIN] Association failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>Association failed: {}</div>", e))
+        }
+    }
+}
+
+async fn admin_grant_kyc_handler(
+    State(state): State<AppState>,
+    Form(form): Form<AdminKycForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Grant KYC request: wallet_id={:?}, custom_address={:?}, token={}",
+        form.wallet_id, form.custom_address, form.token_id);
+
+    let pool = state.config.pool.clone();
+    let mut action_wallet = state.config.wallet.clone();
+
+    // Get the token info
+    let token_result = {
+        let pool_clone = pool.clone();
+        let token_id = form.token_id;
+        tokio::task::spawn_blocking(move || {
+            use diesel::prelude::*;
+            use cradle_back_end::schema::asset_book::dsl::*;
+            use cradle_back_end::asset_book::db_types::AssetBookRecord;
+            let mut conn = pool_clone.get().ok()?;
+            asset_book.find(token_id).first::<AssetBookRecord>(&mut conn).ok()
+        }).await.unwrap()
+    };
+
+    let token = match token_result {
+        Some(t) => t,
+        None => return Html("<div class='text-red-400'>Token not found</div>".to_string())
+    };
+
+    // Check if asset has a valid asset_manager
+    if !token.asset_manager.contains(".") {
+        return Html("<div class='text-yellow-400'>This token does not have an asset manager that requires KYC</div>".to_string());
+    }
+
+    // Determine the address to use
+    let (wallet_address, wallet_db_id) = if let Some(wallet_id) = form.wallet_id {
+        // Using existing wallet from DB
+        let pool_clone = pool.clone();
+        let w_id = wallet_id;
+        let wallet_data = tokio::task::spawn_blocking(move || {
+            use diesel::prelude::*;
+            use cradle_back_end::schema::cradlewalletaccounts::dsl::*;
+            let mut conn = pool_clone.get().ok()?;
+            cradlewalletaccounts.find(w_id).first::<CradleWalletAccountRecord>(&mut conn).ok()
+        }).await.unwrap();
+
+        match wallet_data {
+            Some(w) => (w.address.clone(), Some(w.id)),
+            None => return Html("<div class='text-red-400'>Wallet not found in database</div>".to_string())
+        }
+    } else if let Some(addr) = form.custom_address.filter(|s| !s.is_empty()) {
+        (addr, None)
+    } else {
+        return Html("<div class='text-red-400'>Please select a wallet or enter a custom address</div>".to_string())
+    };
+
+    eprintln!("[ADMIN] Granting KYC for token {} to address {}", token.symbol, wallet_address);
+
+    // Call the smart contract to grant KYC
+    let res = action_wallet
+        .execute(ContractCallInput::AssetManager(
+            AssetManagerFunctionInput::GrantKYC(
+                token.asset_manager.clone(),
+                wallet_address.clone(),
+            ),
+        ))
+        .await;
+
+    match res {
+        Ok(ContractCallOutput::AssetManager(AssetManagerFunctionOutput::GrantKYC(v))) => {
+            eprintln!("[ADMIN] KYC tx: {:?}", v.transaction_id);
+
+            // Update DB record if we have a wallet_db_id
+            if let Some(db_id) = wallet_db_id {
+                let pool_clone = pool.clone();
+                let token_id = token.id;
+                let _ = tokio::task::spawn_blocking(move || {
+                    let mut conn = pool_clone.get().ok()?;
+                    tokio::runtime::Handle::current().block_on(async {
+                        update_asset_book_record(&mut conn, db_id, token_id, AssetRecordAction::KYC).await.ok()
+                    })
+                }).await;
+            }
+
+            Html(format!(
+                "<div class='bg-green-800 p-4 rounded text-green-200'>KYC granted successfully!<br>TX: {}</div>",
+                v.transaction_id
+            ))
+        },
+        Ok(_) => Html("<div class='text-red-400'>Unexpected response format</div>".to_string()),
+        Err(e) => {
+            eprintln!("[ADMIN] KYC grant failed: {:?}", e);
+            Html(format!("<div class='text-red-400'>KYC grant failed: {}</div>", e))
+        }
+    }
+}
+
+async fn admin_associate_and_kyc_handler(
+    State(state): State<AppState>,
+    Form(form): Form<AdminAssociateAndKycForm>,
+) -> Html<String> {
+    eprintln!("[ADMIN] Associate & KYC request: wallet_id={:?}, custom_address={:?}, token={}",
+        form.wallet_id, form.custom_address, form.token_id);
+
+    let pool = state.config.pool.clone();
+    let mut action_wallet = state.config.wallet.clone();
+    let mut results = Vec::new();
+
+    // Get the token info
+    let token_result = {
+        let pool_clone = pool.clone();
+        let token_id = form.token_id;
+        tokio::task::spawn_blocking(move || {
+            use diesel::prelude::*;
+            use cradle_back_end::schema::asset_book::dsl::*;
+            use cradle_back_end::asset_book::db_types::AssetBookRecord;
+            let mut conn = pool_clone.get().ok()?;
+            asset_book.find(token_id).first::<AssetBookRecord>(&mut conn).ok()
+        }).await.unwrap()
+    };
+
+    let token = match token_result {
+        Some(t) => t,
+        None => return Html("<div class='text-red-400'>Token not found</div>".to_string())
+    };
+
+    // Determine the address and contract_id to use
+    let (wallet_address, contract_id, wallet_db_id) = if let Some(wallet_id) = form.wallet_id {
+        let pool_clone = pool.clone();
+        let w_id = wallet_id;
+        let wallet_data = tokio::task::spawn_blocking(move || {
+            use diesel::prelude::*;
+            use cradle_back_end::schema::cradlewalletaccounts::dsl::*;
+            let mut conn = pool_clone.get().ok()?;
+            cradlewalletaccounts.find(w_id).first::<CradleWalletAccountRecord>(&mut conn).ok()
+        }).await.unwrap();
+
+        match wallet_data {
+            Some(w) => (w.address.clone(), w.contract_id.clone(), Some(w.id)),
+            None => return Html("<div class='text-red-400'>Wallet not found in database</div>".to_string())
+        }
+    } else if let Some(addr) = form.custom_address.filter(|s| !s.is_empty()) {
+        match commons::get_contract_id_from_evm_address(&addr).await {
+            Ok(cid) => (addr, cid.to_string(), None),
+            Err(e) => return Html(format!("<div class='text-red-400'>Failed to derive contract ID from address: {}</div>", e))
+        }
+    } else {
+        return Html("<div class='text-red-400'>Please select a wallet or enter a custom address</div>".to_string())
+    };
+
+    // Step 1: Associate token
+    eprintln!("[ADMIN] Step 1: Associating token {} to address {}", token.symbol, wallet_address);
+    let assoc_res = action_wallet
+        .execute(ContractCallInput::CradleAccount(
+            CradleAccountFunctionInput::AssociateToken(AssociateTokenArgs {
+                token: token.token.clone(),
+                account_contract_id: contract_id.clone(),
+            }),
+        ))
+        .await;
+
+    match assoc_res {
+        Ok(ContractCallOutput::CradleAccount(CradleAccountFunctionOutput::AssociateToken(v))) => {
+            results.push(format!("✓ Association TX: {}", v.transaction_id));
+
+            if let Some(db_id) = wallet_db_id {
+                let pool_clone = pool.clone();
+                let token_id = token.id;
+                let _ = tokio::task::spawn_blocking(move || {
+                    let mut conn = pool_clone.get().ok()?;
+                    tokio::runtime::Handle::current().block_on(async {
+                        update_asset_book_record(&mut conn, db_id, token_id, AssetRecordAction::Associate).await.ok()
+                    })
+                }).await;
+            }
+        },
+        Ok(_) => results.push("✗ Association: Unexpected response".to_string()),
+        Err(e) => results.push(format!("✗ Association failed: {}", e)),
+    }
+
+    // Step 2: Grant KYC (if asset manager exists)
+    if token.asset_manager.contains(".") {
+        eprintln!("[ADMIN] Step 2: Granting KYC for token {} to address {}", token.symbol, wallet_address);
+        let kyc_res = action_wallet
+            .execute(ContractCallInput::AssetManager(
+                AssetManagerFunctionInput::GrantKYC(
+                    token.asset_manager.clone(),
+                    wallet_address.clone(),
+                ),
+            ))
+            .await;
+
+        match kyc_res {
+            Ok(ContractCallOutput::AssetManager(AssetManagerFunctionOutput::GrantKYC(v))) => {
+                results.push(format!("✓ KYC TX: {}", v.transaction_id));
+
+                if let Some(db_id) = wallet_db_id {
+                    let pool_clone = pool.clone();
+                    let token_id = token.id;
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let mut conn = pool_clone.get().ok()?;
+                        tokio::runtime::Handle::current().block_on(async {
+                            update_asset_book_record(&mut conn, db_id, token_id, AssetRecordAction::KYC).await.ok()
+                        })
+                    }).await;
+                }
+            },
+            Ok(_) => results.push("✗ KYC: Unexpected response".to_string()),
+            Err(e) => results.push(format!("✗ KYC failed: {}", e)),
+        }
+    } else {
+        results.push("⊘ KYC: Skipped (no asset manager)".to_string());
+    }
+
+    let has_errors = results.iter().any(|r| r.starts_with("✗"));
+    let result_html = results.join("<br>");
+
+    if has_errors {
+        Html(format!(
+            "<div class='bg-yellow-800 p-4 rounded text-yellow-200'>Completed with errors:<br>{}</div>",
+            result_html
+        ))
+    } else {
+        Html(format!(
+            "<div class='bg-green-800 p-4 rounded text-green-200'>All operations successful!<br>{}</div>",
+            result_html
+        ))
     }
 }
