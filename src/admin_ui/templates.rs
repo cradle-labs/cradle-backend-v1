@@ -1,5 +1,5 @@
 use cradle_back_end::accounts::db_types::{CradleAccountRecord, CradleWalletAccountRecord};
-use cradle_back_end::market::db_types::{MarketRecord, MarketType};
+use cradle_back_end::market::db_types::{MarketRecord, MarketType, MarketStatus};
 use cradle_back_end::order_book::db_types::{OrderBookRecord, OrderType};
 use cradle_back_end::asset_book::db_types::AssetBookRecord;
 use cradle_back_end::lending_pool::db_types::{LendingPoolRecord, LoanRecord};
@@ -41,8 +41,14 @@ pub fn index_page() -> String {
             <div class="p-4 text-center text-gray-400">Loading accounts...</div>
         </div>
         <div class="flex-1 flex flex-col items-center justify-center p-10 text-gray-500">
-            <h1 class="text-3xl font-bold mb-4">Cradle Admin</h1>
-            <p>Select an account from the sidebar to begin.</p>
+            <h1 class="text-3xl font-bold mb-4 text-white">Cradle Admin</h1>
+            <p class="mb-8">Select an account from the sidebar to begin.</p>
+            <div class="border-t border-gray-700 pt-8 mt-4">
+                <p class="text-sm text-gray-400 mb-4">Or access global admin tools:</p>
+                <a href="/ui/admin" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-lg text-white font-bold transition-colors">
+                    Admin Tools (Assets, Markets, Aggregator)
+                </a>
+            </div>
         </div>
         "##
     )
@@ -248,10 +254,10 @@ pub fn market_detail(market: MarketRecord, account_id: Uuid, recent_orders: Vec<
              format!("{:?}", o.status)
         ));
     }
-    
+
     // Fallback if empty
     if orders_html.is_empty() {
-        orders_html = r#"<tr><td colspan="5" class="p-4 text-center text-gray-500 italic">No recent orders</td></tr>"#.to_string();
+        orders_html = r#"<tr><td colspan="6" class="p-4 text-center text-gray-500 italic">No recent orders</td></tr>"#.to_string();
     }
 
     format!(
@@ -261,64 +267,84 @@ pub fn market_detail(market: MarketRecord, account_id: Uuid, recent_orders: Vec<
             <div class="lg:col-span-1 space-y-6">
                  <!-- Info Card -->
                  <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
-                     <h3 class="text-xl font-bold text-white mb-2">{}</h3>
-                     <p class="text-sm text-gray-400 mb-4">{}</p>
+                     <h3 class="text-xl font-bold text-white mb-2">{name}</h3>
+                     <p class="text-sm text-gray-400 mb-4">{description}</p>
                      <div class="grid grid-cols-2 gap-4 text-sm">
                         <div class="bg-gray-700/50 p-2 rounded">
-                            <span class="block text-xs text-gray-500">Asset One</span>
-                            <span class="font-mono text-gray-200">{}</span>
+                            <span class="block text-xs text-gray-500">Asset One (Base)</span>
+                            <span class="font-mono text-gray-200" id="asset-one-id">{asset_one}</span>
                         </div>
                         <div class="bg-gray-700/50 p-2 rounded">
-                             <span class="block text-xs text-gray-500">Asset Two</span>
-                            <span class="font-mono text-gray-200">{}</span>
+                             <span class="block text-xs text-gray-500">Asset Two (Quote)</span>
+                            <span class="font-mono text-gray-200" id="asset-two-id">{asset_two}</span>
                         </div>
                      </div>
                  </div>
 
-                 <!-- Order Form -->
+                 <!-- Order Form - Amount In/Out Style -->
+                 <!-- SEMANTICS: ask_asset=what you GIVE, bid_asset=what you WANT -->
                  <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
                     <h4 class="text-lg font-bold text-gray-200 mb-4 border-b border-gray-600 pb-2">Place Order</h4>
-                    <form hx-post="/ui/order" hx-target="#order-message" hx-on::after-request="this.reset()">
-                        <input type="hidden" name="account_id" value="{}" />
-                        <input type="hidden" name="market_id" value="{}" />
-                        
+                    <form id="order-form" hx-post="/ui/order" hx-target="#order-message">
+                        <input type="hidden" name="account_id" value="{account_id}" />
+                        <input type="hidden" name="market_id" value="{market_id}" />
+                        <input type="hidden" id="asset_in" name="asset_in" value="{asset_one}" />
+                        <input type="hidden" id="asset_out" name="asset_out" value="{asset_two}" />
+
                         <div class="space-y-4">
                             <div>
-                                <label class="block text-xs font-medium text-gray-400 mb-1">Side</label>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <label class="cursor-pointer">
-                                        <input type="radio" name="side" value="buy" class="peer sr-only" checked>
-                                        <div class="text-center py-2 rounded bg-gray-700 peer-checked:bg-green-600 peer-checked:text-white transition-all text-sm font-semibold">Buy</div>
-                                    </label>
-                                    <label class="cursor-pointer">
-                                        <input type="radio" name="side" value="sell" class="peer sr-only">
-                                        <div class="text-center py-2 rounded bg-gray-700 peer-checked:bg-red-600 peer-checked:text-white transition-all text-sm font-semibold">Sell</div>
-                                    </label>
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label class="block text-xs font-medium text-gray-400 mb-1">Type</label>
-                                <select name="order_type" class="w-full bg-gray-700 border-none rounded p-2 text-sm focus:ring-1 focus:ring-blue-500">
+                                <label class="block text-xs font-medium text-gray-400 mb-1">Order Type</label>
+                                <select id="order_type" name="order_type" class="w-full bg-gray-700 border-none rounded p-2 text-sm focus:ring-1 focus:ring-blue-500">
                                     <option value="limit">Limit Order</option>
                                     <option value="market">Market Order</option>
                                 </select>
                             </div>
 
-                            <div>
-                                <label class="block text-xs font-medium text-gray-400 mb-1">Price</label>
-                                <input type="text" name="price" placeholder="0.00" class="w-full bg-gray-700 border-none rounded p-2 text-sm font-mono focus:ring-1 focus:ring-blue-500">
+                            <!-- Amount In (What you give) -->
+                            <div class="bg-gray-700/30 p-4 rounded-lg border border-gray-600">
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-xs font-medium text-gray-400">You Give (Amount In)</label>
+                                    <select id="asset_in_select" class="bg-gray-600 border-none rounded px-2 py-1 text-xs">
+                                        <option value="{asset_one}" data-symbol="Asset One">{asset_one_short}</option>
+                                        <option value="{asset_two}" data-symbol="Asset Two">{asset_two_short}</option>
+                                    </select>
+                                </div>
+                                <input type="text" id="amount_in" name="amount_in" placeholder="0.00"
+                                       class="w-full bg-gray-900 border-none rounded p-3 text-lg font-mono focus:ring-1 focus:ring-blue-500" required>
                             </div>
 
-                            <div>
-                                <label class="block text-xs font-medium text-gray-400 mb-1">Amount</label>
-                                <input type="text" name="amount" placeholder="0.00" class="w-full bg-gray-700 border-none rounded p-2 text-sm font-mono focus:ring-1 focus:ring-blue-500" required>
+                            <!-- Price (inferred or editable) -->
+                            <div class="flex items-center justify-center gap-2 text-gray-400">
+                                <div class="flex-1 h-px bg-gray-600"></div>
+                                <div class="text-xs">
+                                    Price: <span id="price-display" class="font-mono text-blue-400">--</span>
+                                    <span id="price-unit" class="text-gray-500"></span>
+                                </div>
+                                <div class="flex-1 h-px bg-gray-600"></div>
+                            </div>
+
+                            <!-- Amount Out (What you receive) -->
+                            <div class="bg-gray-700/30 p-4 rounded-lg border border-gray-600">
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-xs font-medium text-gray-400">You Receive (Amount Out)</label>
+                                    <span id="asset_out_label" class="bg-gray-600 rounded px-2 py-1 text-xs">{asset_two_short}</span>
+                                </div>
+                                <input type="text" id="amount_out" name="amount_out" placeholder="0.00"
+                                       class="w-full bg-gray-900 border-none rounded p-3 text-lg font-mono focus:ring-1 focus:ring-blue-500" required>
+                            </div>
+
+                            <!-- Price Input (for direct control) -->
+                            <div id="price-input-section">
+                                <label class="block text-xs font-medium text-gray-400 mb-1">Set Price (optional - adjusts Amount Out)</label>
+                                <input type="text" id="price_input" name="price" placeholder="Auto-calculated"
+                                       class="w-full bg-gray-700 border-none rounded p-2 text-sm font-mono focus:ring-1 focus:ring-blue-500">
+                                <p class="text-xs text-gray-500 mt-1">Price = Amount In / Amount Out</p>
                             </div>
 
                             <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors">
                                 Submit Order
                             </button>
-                            
+
                              <div id="order-message" class="text-center text-sm min-h-[20px]"></div>
                         </div>
                     </form>
@@ -330,7 +356,7 @@ pub fn market_detail(market: MarketRecord, account_id: Uuid, recent_orders: Vec<
                 <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-700/30">
                     <h4 class="font-bold text-gray-200">Recent Orders</h4>
                     <button class="text-xs text-blue-400 hover:text-blue-300"
-                            hx-get="/ui/market_detail?market_id={}&account_id={}"
+                            hx-get="/ui/market_detail?market_id={market_id}&account_id={account_id}"
                             hx-target="#market-view">Refresh</button>
                 </div>
                 <div class="overflow-x-auto flex-1">
@@ -340,8 +366,8 @@ pub fn market_detail(market: MarketRecord, account_id: Uuid, recent_orders: Vec<
                                 <th class="px-4 py-2">Side</th>
                                 <th class="px-4 py-2">Type</th>
                                 <th class="px-4 py-2">Price</th>
-                                <th class="px-4 py-2">Bid Amt</th>
-                                <th class="px-4 py-2">Ask Amt</th>
+                                <th class="px-4 py-2">Amount In</th>
+                                <th class="px-4 py-2">Amount Out</th>
                                 <th class="px-4 py-2">Status</th>
                             </tr>
                         </thead>
@@ -352,14 +378,106 @@ pub fn market_detail(market: MarketRecord, account_id: Uuid, recent_orders: Vec<
                 </div>
             </div>
          </div>
+
+         <script>
+         (function() {{
+             const assetOne = '{asset_one}';
+             const assetTwo = '{asset_two}';
+             const assetOneShort = '{asset_one_short}';
+             const assetTwoShort = '{asset_two_short}';
+
+             const assetInSelect = document.getElementById('asset_in_select');
+             const amountIn = document.getElementById('amount_in');
+             const amountOut = document.getElementById('amount_out');
+             const priceInput = document.getElementById('price_input');
+             const priceDisplay = document.getElementById('price-display');
+             const priceUnit = document.getElementById('price-unit');
+             const assetOutLabel = document.getElementById('asset_out_label');
+             const assetInHidden = document.getElementById('asset_in');
+             const assetOutHidden = document.getElementById('asset_out');
+
+             let lastEdited = 'amount_in'; // Track which field was last edited
+
+             function updateAssets() {{
+                 const selectedAssetIn = assetInSelect.value;
+                 const selectedAssetOut = selectedAssetIn === assetOne ? assetTwo : assetOne;
+                 const assetOutShort = selectedAssetIn === assetOne ? assetTwoShort : assetOneShort;
+
+                 // Update hidden form fields:
+                 // asset_in = what you GIVE (maps to ask_asset in order book)
+                 // asset_out = what you WANT (maps to bid_asset in order book)
+                 assetInHidden.value = selectedAssetIn;
+                 assetOutHidden.value = selectedAssetOut;
+
+                 // Update the "You Receive" label
+                 assetOutLabel.textContent = assetOutShort;
+
+                 // Update price unit display
+                 const assetInShort = selectedAssetIn === assetOne ? assetOneShort : assetTwoShort;
+                 priceUnit.textContent = `(${{assetInShort}}/${{assetOutShort}})`;
+
+                 updatePrice();
+             }}
+
+             function updatePrice() {{
+                 const inVal = parseFloat(amountIn.value) || 0;
+                 const outVal = parseFloat(amountOut.value) || 0;
+
+                 if (inVal > 0 && outVal > 0) {{
+                     const price = inVal / outVal;
+                     priceDisplay.textContent = price.toFixed(8);
+                     if (!priceInput.dataset.userEdited) {{
+                         priceInput.value = price.toFixed(8);
+                     }}
+                 }} else {{
+                     priceDisplay.textContent = '--';
+                 }}
+             }}
+
+             function calculateFromPrice() {{
+                 const inVal = parseFloat(amountIn.value) || 0;
+                 const priceVal = parseFloat(priceInput.value) || 0;
+
+                 if (inVal > 0 && priceVal > 0) {{
+                     const outVal = inVal / priceVal;
+                     amountOut.value = outVal.toFixed(8);
+                     priceDisplay.textContent = priceVal.toFixed(8);
+                 }}
+             }}
+
+             assetInSelect.addEventListener('change', updateAssets);
+
+             amountIn.addEventListener('input', function() {{
+                 lastEdited = 'amount_in';
+                 priceInput.dataset.userEdited = '';
+                 updatePrice();
+             }});
+
+             amountOut.addEventListener('input', function() {{
+                 lastEdited = 'amount_out';
+                 priceInput.dataset.userEdited = '';
+                 updatePrice();
+             }});
+
+             priceInput.addEventListener('input', function() {{
+                 priceInput.dataset.userEdited = 'true';
+                 calculateFromPrice();
+             }});
+
+             // Initialize
+             updateAssets();
+         }})();
+         </script>
          "##,
-         market.name,
-         market.description.unwrap_or_default(),
-         market.asset_one,
-         market.asset_two,
-         account_id,
-         market.id,
-         market.id, account_id
+         name = market.name,
+         description = market.description.clone().unwrap_or_default(),
+         asset_one = market.asset_one,
+         asset_two = market.asset_two,
+         asset_one_short = &market.asset_one.to_string()[..8],
+         asset_two_short = &market.asset_two.to_string()[..8],
+         account_id = account_id,
+         market_id = market.id,
+         orders_html = orders_html
     )
 }
 
@@ -1019,7 +1137,7 @@ pub fn oracle_tab(account_id: Uuid, pools: Vec<LendingPoolRecord>, assets: Vec<A
             <!-- Pool Selector -->
             <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
                 <label class="block text-sm font-medium text-gray-300 mb-2">Select Lending Pool</label>
-                <select id="oracle-pool-selector" 
+                <select id="oracle-pool-selector"
                         class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3 focus:ring-2 focus:ring-blue-500">
                     <option value="">-- Select a Pool --</option>
                     {}
@@ -1029,7 +1147,7 @@ pub fn oracle_tab(account_id: Uuid, pools: Vec<LendingPoolRecord>, assets: Vec<A
             <!-- Asset Selector -->
             <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
                 <label class="block text-sm font-medium text-gray-300 mb-2">Select Asset</label>
-                <select id="oracle-asset-selector" 
+                <select id="oracle-asset-selector"
                         class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3 focus:ring-2 focus:ring-blue-500">
                     <option value="">-- Select an Asset --</option>
                     {}
@@ -1065,22 +1183,22 @@ pub fn oracle_tab(account_id: Uuid, pools: Vec<LendingPoolRecord>, assets: Vec<A
                     <form hx-post="/ui/oracle/set_price" hx-target="#oracle-result" class="space-y-4">
                         <input type="hidden" name="pool_id" value="${{poolId}}" />
                         <input type="hidden" name="asset_id" value="${{assetId}}" />
-                        
+
                         <div>
                             <label class="block text-sm font-medium text-gray-300 mb-2">Price Multiplier</label>
-                            <input type="number" step="0.000001" name="price" placeholder="1.0" 
+                            <input type="number" step="0.000001" name="price" placeholder="1.0"
                                    class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-blue-500" required>
                             <p class="text-xs text-gray-500 mt-1">Enter price in reserve asset decimals (e.g., 1.5 for 1.5x)</p>
                         </div>
-                        
+
                         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg">
                             Update Oracle Price
                         </button>
-                        
+
                         <div id="oracle-result"></div>
                     </form>
                 `;
-                
+
                 // Re-process htmx for the new form
                 htmx.process(formContent);
             }}
@@ -1090,5 +1208,934 @@ pub fn oracle_tab(account_id: Uuid, pools: Vec<LendingPoolRecord>, assets: Vec<A
         </script>
         "##,
         pool_opts, asset_opts, account_id
+    )
+}
+
+// ============================================================================
+// GLOBAL ADMIN TOOLS TEMPLATES (No account selection required)
+// ============================================================================
+
+pub fn admin_tools_page() -> String {
+    base_layout(
+        r##"
+        <div class="flex-1 flex flex-col min-w-0 bg-gray-900">
+            <!-- Top Bar -->
+            <div class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between shadow-md z-10">
+                <div>
+                    <div class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Global Admin Tools</div>
+                    <div class="text-xl font-mono text-white">System Management</div>
+                </div>
+                <a href="/" class="text-blue-400 hover:text-blue-300 text-sm">
+                    &larr; Back to Account Dashboard
+                </a>
+            </div>
+
+            <!-- Tabs Navigation -->
+            <div class="flex border-b border-gray-700 bg-gray-800/50 px-6 pt-2 gap-1">
+                <button class="px-6 py-3 text-sm font-medium text-blue-400 border-b-2 border-blue-400 hover:bg-gray-700/50 rounded-t-lg transition-colors focus:outline-none admin-tab"
+                        hx-get="/ui/admin/tabs/assets"
+                        hx-target="#admin-tab-content">
+                    Assets/Tokens
+                </button>
+                <button class="px-6 py-3 text-sm font-medium text-gray-400 border-b-2 border-transparent hover:text-gray-200 hover:bg-gray-700/50 rounded-t-lg transition-colors focus:outline-none admin-tab"
+                        hx-get="/ui/admin/tabs/markets"
+                        hx-target="#admin-tab-content">
+                    Markets
+                </button>
+                <button class="px-6 py-3 text-sm font-medium text-gray-400 border-b-2 border-transparent hover:text-gray-200 hover:bg-gray-700/50 rounded-t-lg transition-colors focus:outline-none admin-tab"
+                        hx-get="/ui/admin/tabs/aggregator"
+                        hx-target="#admin-tab-content">
+                    Time Series Aggregator
+                </button>
+                <button class="px-6 py-3 text-sm font-medium text-gray-400 border-b-2 border-transparent hover:text-gray-200 hover:bg-gray-700/50 rounded-t-lg transition-colors focus:outline-none admin-tab"
+                        hx-get="/ui/admin/tabs/accounts"
+                        hx-target="#admin-tab-content">
+                    Accounts/KYC
+                </button>
+            </div>
+
+            <!-- Tab Content Area -->
+            <div id="admin-tab-content" class="flex-1 overflow-y-auto p-6" hx-get="/ui/admin/tabs/assets" hx-trigger="load">
+                <div class="flex justify-center items-center h-full text-gray-500 animate-pulse">Loading...</div>
+            </div>
+        </div>
+
+        <script>
+            document.querySelectorAll('.admin-tab').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.admin-tab').forEach(b => {
+                        b.classList.remove('border-blue-400', 'text-blue-400');
+                        b.classList.add('border-transparent', 'text-gray-400');
+                    });
+                    this.classList.remove('border-transparent', 'text-gray-400');
+                    this.classList.add('border-blue-400', 'text-blue-400');
+                });
+            });
+        </script>
+        "##
+    )
+}
+
+pub fn admin_assets_tab(assets: Vec<AssetBookRecord>) -> String {
+    let mut assets_html = String::new();
+    for a in &assets {
+        assets_html.push_str(&format!(
+            r##"
+            <tr class="border-b border-gray-700 hover:bg-gray-700/50">
+                <td class="px-4 py-3 font-mono text-sm text-blue-400">{}</td>
+                <td class="px-4 py-3 text-sm font-bold text-white">{}</td>
+                <td class="px-4 py-3 text-sm text-gray-300">{}</td>
+                <td class="px-4 py-3 text-sm text-gray-400">{}</td>
+                <td class="px-4 py-3 text-xs text-gray-500 font-mono">{}</td>
+            </tr>
+            "##,
+            &a.symbol, &a.name, format!("{:?}", a.asset_type), a.decimals, &a.id
+        ));
+    }
+
+    if assets_html.is_empty() {
+        assets_html = r##"<tr><td colspan="5" class="p-4 text-center text-gray-500 italic">No assets found</td></tr>"##.to_string();
+    }
+
+    format!(
+        r##"
+        <div class="space-y-6">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-white mb-2">Asset Management</h2>
+                <p class="text-gray-400">Create new tokens or register existing ones.</p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex gap-4">
+                <button hx-get="/ui/admin/assets/create_new_form" hx-target="#asset-form-area"
+                        class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-white font-bold">
+                    + Create New Token
+                </button>
+                <button hx-get="/ui/admin/assets/create_existing_form" hx-target="#asset-form-area"
+                        class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-white font-bold">
+                    + Register Existing Token
+                </button>
+            </div>
+
+            <!-- Form Area -->
+            <div id="asset-form-area" class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <p class="text-gray-400 text-center">Select an action above to create or register a token</p>
+            </div>
+
+            <!-- Assets List -->
+            <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-700/30">
+                    <h4 class="font-bold text-gray-200">Registered Assets ({} total)</h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-700/50 text-xs text-gray-400 uppercase">
+                            <tr>
+                                <th class="px-4 py-2">Symbol</th>
+                                <th class="px-4 py-2">Name</th>
+                                <th class="px-4 py-2">Type</th>
+                                <th class="px-4 py-2">Decimals</th>
+                                <th class="px-4 py-2">ID</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-700/50">
+                            {}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        "##,
+        assets.len(), assets_html
+    )
+}
+
+pub fn create_new_asset_form() -> String {
+    r##"
+    <h3 class="text-xl font-bold text-white mb-4">Create New Token</h3>
+    <p class="text-gray-400 text-sm mb-4">This will deploy a new token contract on the blockchain.</p>
+    <form hx-post="/ui/admin/assets/create_new" hx-target="#asset-result" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Token Name</label>
+                <input type="text" name="name" placeholder="e.g., USD Coin"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Symbol</label>
+                <input type="text" name="symbol" placeholder="e.g., USDC"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Decimals</label>
+                <input type="number" name="decimals" value="8" min="0" max="18"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Asset Type</label>
+                <select name="asset_type" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                    <option value="native">Native</option>
+                    <option value="bridged">Bridged</option>
+                    <option value="yield_bearing">Yield Bearing</option>
+                    <option value="chain_native">Chain Native</option>
+                    <option value="stablecoin">StableCoin</option>
+                    <option value="volatile">Volatile</option>
+                </select>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Icon URL (optional)</label>
+            <input type="text" name="icon" placeholder="https://..."
+                   class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white">
+        </div>
+
+        <button type="submit" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg">
+            Create Token
+        </button>
+
+        <div id="asset-result"></div>
+    </form>
+    "##.to_string()
+}
+
+pub fn create_existing_asset_form() -> String {
+    r##"
+    <h3 class="text-xl font-bold text-white mb-4">Register Existing Token</h3>
+    <p class="text-gray-400 text-sm mb-4">Register an existing token that's already deployed on the blockchain.</p>
+    <form hx-post="/ui/admin/assets/create_existing" hx-target="#asset-result" class="space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Token Address</label>
+            <input type="text" name="token" placeholder="0x... (Solidity address)"
+                   class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white font-mono" required>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Asset Manager Address (optional)</label>
+            <input type="text" name="asset_manager" placeholder="0x... (if applicable)"
+                   class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white font-mono">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Token Name</label>
+                <input type="text" name="name" placeholder="e.g., USD Coin"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Symbol</label>
+                <input type="text" name="symbol" placeholder="e.g., USDC"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Decimals</label>
+                <input type="number" name="decimals" value="8" min="0" max="18"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Asset Type</label>
+                <select name="asset_type" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                    <option value="native">Native</option>
+                    <option value="bridged">Bridged</option>
+                    <option value="yield_bearing">Yield Bearing</option>
+                    <option value="chain_native">Chain Native</option>
+                    <option value="stablecoin">StableCoin</option>
+                    <option value="volatile">Volatile</option>
+                </select>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Icon URL (optional)</label>
+            <input type="text" name="icon" placeholder="https://..."
+                   class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white">
+        </div>
+
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg">
+            Register Token
+        </button>
+
+        <div id="asset-result"></div>
+    </form>
+    "##.to_string()
+}
+
+pub fn admin_markets_tab(markets: Vec<MarketRecord>, assets: Vec<AssetBookRecord>) -> String {
+    let mut markets_html = String::new();
+
+    // Create a hashmap for quick asset lookup
+    let asset_map: std::collections::HashMap<Uuid, &AssetBookRecord> = assets.iter().map(|a| (a.id, a)).collect();
+
+    for m in &markets {
+        let asset_one_symbol = asset_map.get(&m.asset_one).map(|a| a.symbol.as_str()).unwrap_or("Unknown");
+        let asset_two_symbol = asset_map.get(&m.asset_two).map(|a| a.symbol.as_str()).unwrap_or("Unknown");
+
+        let status_color = match m.market_status {
+            MarketStatus::Active => "text-green-400",
+            MarketStatus::InActive => "text-gray-400",
+            MarketStatus::Suspended => "text-red-400",
+        };
+
+        markets_html.push_str(&format!(
+            r##"
+            <tr class="border-b border-gray-700 hover:bg-gray-700/50">
+                <td class="px-4 py-3 font-bold text-white">{}</td>
+                <td class="px-4 py-3 text-sm text-blue-400">{}/{}</td>
+                <td class="px-4 py-3 text-sm text-gray-300">{:?}</td>
+                <td class="px-4 py-3 text-sm {}"><span class="px-2 py-1 rounded bg-gray-700">{:?}</span></td>
+                <td class="px-4 py-3 text-sm text-gray-400">{:?}</td>
+                <td class="px-4 py-3 text-xs text-gray-500 font-mono">{}</td>
+            </tr>
+            "##,
+            &m.name, asset_one_symbol, asset_two_symbol, m.market_type, status_color, m.market_status, m.market_regulation, &m.id
+        ));
+    }
+
+    if markets_html.is_empty() {
+        markets_html = r##"<tr><td colspan="6" class="p-4 text-center text-gray-500 italic">No markets found</td></tr>"##.to_string();
+    }
+
+    // Build asset options for the create form
+    let mut asset_opts = String::new();
+    for a in &assets {
+        asset_opts.push_str(&format!(
+            r##"<option value="{}">{} ({})</option>"##,
+            a.id, a.symbol, a.name
+        ));
+    }
+
+    format!(
+        r##"
+        <div class="space-y-6">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-white mb-2">Market Management</h2>
+                <p class="text-gray-400">Create and manage trading markets.</p>
+            </div>
+
+            <!-- Action Button -->
+            <div class="flex gap-4">
+                <button hx-get="/ui/admin/markets/create_form" hx-target="#market-form-area"
+                        class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-white font-bold">
+                    + Create New Market
+                </button>
+            </div>
+
+            <!-- Form Area -->
+            <div id="market-form-area" class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <p class="text-gray-400 text-center">Click above to create a new market</p>
+            </div>
+
+            <!-- Markets List -->
+            <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-700/30">
+                    <h4 class="font-bold text-gray-200">Active Markets ({} total)</h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-700/50 text-xs text-gray-400 uppercase">
+                            <tr>
+                                <th class="px-4 py-2">Name</th>
+                                <th class="px-4 py-2">Pair</th>
+                                <th class="px-4 py-2">Type</th>
+                                <th class="px-4 py-2">Status</th>
+                                <th class="px-4 py-2">Regulation</th>
+                                <th class="px-4 py-2">ID</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-700/50">
+                            {}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        "##,
+        markets.len(), markets_html
+    )
+}
+
+pub fn create_market_form(assets: Vec<AssetBookRecord>) -> String {
+    let mut asset_opts = String::new();
+    for a in &assets {
+        asset_opts.push_str(&format!(
+            r##"<option value="{}">{} ({})</option>"##,
+            a.id, a.symbol, a.name
+        ));
+    }
+
+    format!(
+        r##"
+        <h3 class="text-xl font-bold text-white mb-4">Create New Market</h3>
+        <form hx-post="/ui/admin/markets/create" hx-target="#market-result" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Market Name</label>
+                <input type="text" name="name" placeholder="e.g., BTC/USDC Spot"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white" required>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Description (optional)</label>
+                <textarea name="description" rows="2" placeholder="Market description..."
+                          class="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-white"></textarea>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Base Asset (Asset One)</label>
+                    <select name="asset_one" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                        <option value="">-- Select Base Asset --</option>
+                        {}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Quote Asset (Asset Two)</label>
+                    <select name="asset_two" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                        <option value="">-- Select Quote Asset --</option>
+                        {}
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Market Type</label>
+                    <select name="market_type" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                        <option value="spot">Spot</option>
+                        <option value="derivative">Derivative</option>
+                        <option value="futures">Futures</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Regulation</label>
+                    <select name="market_regulation" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                        <option value="unregulated">Unregulated</option>
+                        <option value="regulated">Regulated</option>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg">
+                Create Market
+            </button>
+
+            <div id="market-result"></div>
+        </form>
+        "##,
+        asset_opts, asset_opts
+    )
+}
+
+pub fn admin_aggregator_tab(markets: Vec<MarketRecord>, assets: Vec<AssetBookRecord>) -> String {
+    let mut market_opts = String::new();
+
+    // Create a hashmap for quick asset lookup
+    let asset_map: std::collections::HashMap<Uuid, &AssetBookRecord> = assets.iter().map(|a| (a.id, a)).collect();
+
+    for m in &markets {
+        let asset_one_symbol = asset_map.get(&m.asset_one).map(|a| a.symbol.as_str()).unwrap_or("Unknown");
+        let asset_two_symbol = asset_map.get(&m.asset_two).map(|a| a.symbol.as_str()).unwrap_or("Unknown");
+
+        market_opts.push_str(&format!(
+            r##"<option value="{}" data-asset-one="{}" data-asset-two="{}" data-asset-one-symbol="{}" data-asset-two-symbol="{}">{} ({}/{})</option>"##,
+            m.id, m.asset_one, m.asset_two, asset_one_symbol, asset_two_symbol, m.name, asset_one_symbol, asset_two_symbol
+        ));
+    }
+
+    format!(
+        r##"
+        <div class="space-y-6">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-white mb-2">Time Series Aggregator</h2>
+                <p class="text-gray-400">Generate OHLC data from orderbook trades.</p>
+            </div>
+
+            <!-- Mode Toggle -->
+            <div class="flex gap-2 justify-center">
+                <button type="button" onclick="toggleAggregatorMode('manual')" id="agg-mode-manual"
+                        class="px-6 py-2 rounded-lg bg-purple-600 text-white font-medium transition-colors">
+                    Manual Mode
+                </button>
+                <button type="button" onclick="toggleAggregatorMode('batch')" id="agg-mode-batch"
+                        class="px-6 py-2 rounded-lg bg-gray-700 text-gray-300 font-medium transition-colors hover:bg-gray-600">
+                    Batch Mode
+                </button>
+            </div>
+
+            <!-- Manual Mode Form -->
+            <div id="manual-mode-section" class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <h3 class="text-lg font-bold text-white mb-4">Manual Aggregation</h3>
+                <form id="manual-form" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Select Market</label>
+                            <select id="aggregator-market" name="market_id" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                                <option value="">-- Select Market --</option>
+                                {market_opts}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Select Asset</label>
+                            <select id="aggregator-asset" name="asset_id" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                                <option value="">-- Select Market First --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Aggregation Interval</label>
+                            <select name="interval" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                                <option value="15secs">15 Seconds</option>
+                                <option value="30secs">30 Seconds</option>
+                                <option value="45secs">45 Seconds</option>
+                                <option value="1min">1 Minute</option>
+                                <option value="5min">5 Minutes</option>
+                                <option value="15min" selected>15 Minutes</option>
+                                <option value="30min">30 Minutes</option>
+                                <option value="1hr">1 Hour</option>
+                                <option value="4hr">4 Hours</option>
+                                <option value="1day">1 Day</option>
+                                <option value="1week">1 Week</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Time Range</label>
+                            <select name="duration" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                                <option value="24h">Last 24 Hours</option>
+                                <option value="7d" selected>Last 7 Days</option>
+                                <option value="30d">Last 30 Days</option>
+                                <option value="90d">Last 90 Days</option>
+                                <option value="all">All Time</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="button" onclick="runManualAggregation()" id="manual-run-btn"
+                            class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-lg transition-colors">
+                        Run Aggregation
+                    </button>
+                </form>
+
+                <div id="manual-result" class="mt-4"></div>
+            </div>
+
+            <!-- Batch Mode Form -->
+            <div id="batch-mode-section" class="hidden bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                <h3 class="text-lg font-bold text-white mb-4">Batch Aggregation</h3>
+                <p class="text-gray-400 text-sm mb-4">
+                    Run all standard aggregations for a market automatically:
+                </p>
+
+                <div class="grid grid-cols-3 gap-4 mb-4 text-sm">
+                    <div class="bg-gray-700/50 p-3 rounded-lg">
+                        <div class="font-bold text-purple-400 mb-1">24 Hours</div>
+                        <div class="text-gray-400">15s, 30s, 45s, 1m, 15m, 30m, 1h, 4h</div>
+                    </div>
+                    <div class="bg-gray-700/50 p-3 rounded-lg">
+                        <div class="font-bold text-blue-400 mb-1">7 Days</div>
+                        <div class="text-gray-400">1 day intervals</div>
+                    </div>
+                    <div class="bg-gray-700/50 p-3 rounded-lg">
+                        <div class="font-bold text-green-400 mb-1">30 Days</div>
+                        <div class="text-gray-400">1 week intervals</div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Select Market</label>
+                    <select id="batch-market" class="w-full bg-gray-900 border border-gray-600 text-gray-100 rounded-lg p-3" required>
+                        <option value="">-- Select Market --</option>
+                        {market_opts}
+                    </select>
+                </div>
+
+                <div class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 mb-4">
+                    <div class="text-yellow-400 text-sm">
+                        <strong>Note:</strong> This will process both assets in the market and may take several minutes depending on trade volume.
+                    </div>
+                </div>
+
+                <button type="button" onclick="runBatchAggregation()" id="batch-run-btn"
+                        class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold py-3 rounded-lg transition-colors">
+                    <span id="batch-btn-text">Run Batch Aggregation</span>
+                    <span id="batch-btn-loading" class="hidden">
+                        <svg class="animate-spin inline-block w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing... This may take a few minutes
+                    </span>
+                </button>
+
+                <div id="batch-result" class="mt-4"></div>
+            </div>
+
+            <!-- Info Box -->
+            <div class="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                <h4 class="font-bold text-gray-200 mb-2">How it works</h4>
+                <ul class="text-sm text-gray-400 space-y-2">
+                    <li><strong>Manual Mode:</strong> Select specific market, asset, interval and time range</li>
+                    <li><strong>Batch Mode:</strong> Automatically runs all standard intervals for both assets in a market</li>
+                    <li>OHLC data is generated from settled orderbook trades</li>
+                </ul>
+            </div>
+        </div>
+
+        <script>
+            let aggregatorMode = 'manual';
+
+            function toggleAggregatorMode(mode) {{
+                aggregatorMode = mode;
+                const manualBtn = document.getElementById('agg-mode-manual');
+                const batchBtn = document.getElementById('agg-mode-batch');
+                const manualSection = document.getElementById('manual-mode-section');
+                const batchSection = document.getElementById('batch-mode-section');
+
+                if (mode === 'manual') {{
+                    manualBtn.className = 'px-6 py-2 rounded-lg bg-purple-600 text-white font-medium transition-colors';
+                    batchBtn.className = 'px-6 py-2 rounded-lg bg-gray-700 text-gray-300 font-medium transition-colors hover:bg-gray-600';
+                    manualSection.classList.remove('hidden');
+                    batchSection.classList.add('hidden');
+                }} else {{
+                    batchBtn.className = 'px-6 py-2 rounded-lg bg-purple-600 text-white font-medium transition-colors';
+                    manualBtn.className = 'px-6 py-2 rounded-lg bg-gray-700 text-gray-300 font-medium transition-colors hover:bg-gray-600';
+                    batchSection.classList.remove('hidden');
+                    manualSection.classList.add('hidden');
+                }}
+            }}
+
+            document.getElementById('aggregator-market').addEventListener('change', function() {{
+                const select = this;
+                const assetSelect = document.getElementById('aggregator-asset');
+                const selectedOption = select.options[select.selectedIndex];
+
+                if (!selectedOption.value) {{
+                    assetSelect.innerHTML = '<option value="">-- Select Market First --</option>';
+                    return;
+                }}
+
+                const assetOne = selectedOption.dataset.assetOne;
+                const assetTwo = selectedOption.dataset.assetTwo;
+                const assetOneSymbol = selectedOption.dataset.assetOneSymbol;
+                const assetTwoSymbol = selectedOption.dataset.assetTwoSymbol;
+
+                assetSelect.innerHTML = `
+                    <option value="">-- Select Asset --</option>
+                    <option value="${{assetOne}}">${{assetOneSymbol}} (Base)</option>
+                    <option value="${{assetTwo}}">${{assetTwoSymbol}} (Quote)</option>
+                `;
+            }});
+
+            function runManualAggregation() {{
+                const form = document.getElementById('manual-form');
+                const marketId = form.querySelector('[name="market_id"]').value;
+                const assetId = form.querySelector('[name="asset_id"]').value;
+                const interval = form.querySelector('[name="interval"]').value;
+                const duration = form.querySelector('[name="duration"]').value;
+
+                if (!marketId || !assetId) {{
+                    document.getElementById('manual-result').innerHTML =
+                        "<div class='text-red-400'>Please select a market and asset</div>";
+                    return;
+                }}
+
+                const btn = document.getElementById('manual-run-btn');
+                btn.disabled = true;
+                btn.innerHTML = '<svg class="animate-spin inline-block w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...';
+
+                document.getElementById('manual-result').innerHTML =
+                    "<div class='text-blue-400 animate-pulse'>Running aggregation...</div>";
+
+                const params = new URLSearchParams();
+                params.append('market_id', marketId);
+                params.append('asset_id', assetId);
+                params.append('interval', interval);
+                params.append('duration', duration);
+
+                fetch('/ui/admin/aggregator/run', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+                    body: params.toString()
+                }})
+                .then(response => response.text())
+                .then(html => {{
+                    document.getElementById('manual-result').innerHTML = html;
+                    btn.disabled = false;
+                    btn.innerHTML = 'Run Aggregation';
+                }})
+                .catch(error => {{
+                    document.getElementById('manual-result').innerHTML =
+                        "<div class='text-red-400'>Request failed: " + error + "</div>";
+                    btn.disabled = false;
+                    btn.innerHTML = 'Run Aggregation';
+                }});
+            }}
+
+            function runBatchAggregation() {{
+                const marketId = document.getElementById('batch-market').value;
+                if (!marketId) {{
+                    document.getElementById('batch-result').innerHTML =
+                        "<div class='text-red-400'>Please select a market</div>";
+                    return;
+                }}
+
+                const btn = document.getElementById('batch-run-btn');
+                const btnText = document.getElementById('batch-btn-text');
+                const btnLoading = document.getElementById('batch-btn-loading');
+
+                btn.disabled = true;
+                btnText.classList.add('hidden');
+                btnLoading.classList.remove('hidden');
+
+                document.getElementById('batch-result').innerHTML =
+                    "<div class='text-blue-400 animate-pulse'>Running batch aggregation for all intervals and assets...<br><span class='text-xs text-gray-400'>This may take several minutes</span></div>";
+
+                const params = new URLSearchParams();
+                params.append('market_id', marketId);
+
+                fetch('/ui/admin/aggregator/run_batch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+                    body: params.toString()
+                }})
+                .then(response => response.text())
+                .then(html => {{
+                    document.getElementById('batch-result').innerHTML = html;
+                    btn.disabled = false;
+                    btnText.classList.remove('hidden');
+                    btnLoading.classList.add('hidden');
+                }})
+                .catch(error => {{
+                    document.getElementById('batch-result').innerHTML =
+                        "<div class='text-red-400'>Request failed: " + error + "</div>";
+                    btn.disabled = false;
+                    btnText.classList.remove('hidden');
+                    btnLoading.classList.add('hidden');
+                }});
+            }}
+        </script>
+        "##,
+        market_opts = market_opts
+    )
+}
+
+pub fn admin_accounts_tab(
+    assets: Vec<AssetBookRecord>,
+    wallets: Vec<CradleWalletAccountRecord>,
+) -> String {
+    // Build wallet options
+    let mut wallet_opts = String::from(r#"<option value="">-- Select from Database --</option>"#);
+    for w in &wallets {
+        let short_addr = if w.address.len() > 14 {
+            format!("{}...{}", &w.address[0..8], &w.address[w.address.len()-6..])
+        } else {
+            w.address.clone()
+        };
+        wallet_opts.push_str(&format!(
+            r#"<option value="{}">{} ({})</option>"#,
+            w.id, short_addr, w.id.to_string().split('-').next().unwrap_or("")
+        ));
+    }
+
+    // Build asset options
+    let mut asset_opts = String::from(r#"<option value="">-- Select Token --</option>"#);
+    for a in &assets {
+        asset_opts.push_str(&format!(
+            r#"<option value="{}">{} ({})</option>"#,
+            a.id, a.symbol, a.name
+        ));
+    }
+
+    format!(
+        r##"
+        <div class="space-y-6">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-white mb-2">Account Management</h2>
+                <p class="text-gray-400">Associate tokens and grant KYC to any wallet address</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Main Form -->
+                <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700">
+                    <h3 class="text-lg font-bold text-white mb-4">Token Association & KYC</h3>
+
+                    <div class="space-y-4">
+                        <!-- Wallet Selection Mode -->
+                        <div class="flex gap-2 mb-4">
+                            <button type="button" onclick="toggleWalletMode('db')" id="wallet-mode-db"
+                                    class="flex-1 py-2 px-4 rounded-lg bg-blue-600 text-white font-medium transition-colors">
+                                Select from DB
+                            </button>
+                            <button type="button" onclick="toggleWalletMode('custom')" id="wallet-mode-custom"
+                                    class="flex-1 py-2 px-4 rounded-lg bg-gray-700 text-gray-300 font-medium transition-colors hover:bg-gray-600">
+                                Custom Address
+                            </button>
+                        </div>
+
+                        <!-- DB Wallet Select -->
+                        <div id="wallet-db-section">
+                            <label class="block text-sm text-gray-400 mb-1">Select Wallet</label>
+                            <select id="wallet-select" name="wallet_id"
+                                    class="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:ring-2 focus:ring-blue-500">
+                                {wallet_opts}
+                            </select>
+                        </div>
+
+                        <!-- Custom Address Input -->
+                        <div id="wallet-custom-section" class="hidden">
+                            <label class="block text-sm text-gray-400 mb-1">EVM Address (0x...)</label>
+                            <input type="text" id="custom-address" name="custom_address"
+                                   placeholder="0x..."
+                                   class="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:ring-2 focus:ring-blue-500 font-mono" />
+                        </div>
+
+                        <!-- Token Selection -->
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Select Token</label>
+                            <select id="token-select" name="token_id"
+                                    class="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:ring-2 focus:ring-blue-500">
+                                {asset_opts}
+                            </select>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="grid grid-cols-3 gap-3 pt-4">
+                            <button type="button" onclick="submitAction('associate')"
+                                    class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition-colors">
+                                Associate Only
+                            </button>
+                            <button type="button" onclick="submitAction('kyc')"
+                                    class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-lg transition-colors">
+                                KYC Only
+                            </button>
+                            <button type="button" onclick="submitAction('both')"
+                                    class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-lg transition-colors">
+                                Both
+                            </button>
+                        </div>
+
+                        <!-- Result Area -->
+                        <div id="account-result" class="mt-4"></div>
+                    </div>
+                </div>
+
+                <!-- Info Panel -->
+                <div class="space-y-4">
+                    <div class="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                        <h4 class="font-bold text-gray-200 mb-3">What is Token Association?</h4>
+                        <p class="text-sm text-gray-400">
+                            Token association registers a token with a wallet on the Hedera network.
+                            A wallet must associate with a token before it can receive or hold that token.
+                        </p>
+                    </div>
+
+                    <div class="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                        <h4 class="font-bold text-gray-200 mb-3">What is KYC?</h4>
+                        <p class="text-sm text-gray-400">
+                            KYC (Know Your Customer) approval allows a wallet to transact with a token
+                            that has KYC requirements enabled. The token's asset manager must grant KYC
+                            to each wallet that wants to use the token.
+                        </p>
+                    </div>
+
+                    <div class="bg-blue-900/30 p-6 rounded-2xl border border-blue-700">
+                        <h4 class="font-bold text-blue-300 mb-3">Quick Tips</h4>
+                        <ul class="text-sm text-blue-200 space-y-2">
+                            <li>• Use "Select from DB" for wallets already registered in the system</li>
+                            <li>• Use "Custom Address" for any external EVM address</li>
+                            <li>• "Both" will associate then grant KYC in sequence</li>
+                            <li>• Some tokens may not require KYC (native tokens)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let walletMode = 'db';
+
+            function toggleWalletMode(mode) {{
+                walletMode = mode;
+                const dbBtn = document.getElementById('wallet-mode-db');
+                const customBtn = document.getElementById('wallet-mode-custom');
+                const dbSection = document.getElementById('wallet-db-section');
+                const customSection = document.getElementById('wallet-custom-section');
+
+                if (mode === 'db') {{
+                    dbBtn.className = 'flex-1 py-2 px-4 rounded-lg bg-blue-600 text-white font-medium transition-colors';
+                    customBtn.className = 'flex-1 py-2 px-4 rounded-lg bg-gray-700 text-gray-300 font-medium transition-colors hover:bg-gray-600';
+                    dbSection.classList.remove('hidden');
+                    customSection.classList.add('hidden');
+                }} else {{
+                    customBtn.className = 'flex-1 py-2 px-4 rounded-lg bg-blue-600 text-white font-medium transition-colors';
+                    dbBtn.className = 'flex-1 py-2 px-4 rounded-lg bg-gray-700 text-gray-300 font-medium transition-colors hover:bg-gray-600';
+                    customSection.classList.remove('hidden');
+                    dbSection.classList.add('hidden');
+                }}
+            }}
+
+            function submitAction(action) {{
+                const tokenId = document.getElementById('token-select').value;
+                if (!tokenId) {{
+                    document.getElementById('account-result').innerHTML =
+                        "<div class='text-red-400'>Please select a token</div>";
+                    return;
+                }}
+
+                let params = new URLSearchParams();
+                params.append('token_id', tokenId);
+
+                if (walletMode === 'db') {{
+                    const walletId = document.getElementById('wallet-select').value;
+                    if (!walletId) {{
+                        document.getElementById('account-result').innerHTML =
+                            "<div class='text-red-400'>Please select a wallet</div>";
+                        return;
+                    }}
+                    params.append('wallet_id', walletId);
+                }} else {{
+                    const customAddr = document.getElementById('custom-address').value;
+                    if (!customAddr || !customAddr.startsWith('0x')) {{
+                        document.getElementById('account-result').innerHTML =
+                            "<div class='text-red-400'>Please enter a valid EVM address (0x...)</div>";
+                        return;
+                    }}
+                    params.append('custom_address', customAddr);
+                }}
+
+                let endpoint = '/ui/admin/accounts/';
+                if (action === 'associate') endpoint += 'associate';
+                else if (action === 'kyc') endpoint += 'kyc';
+                else endpoint += 'associate_and_kyc';
+
+                document.getElementById('account-result').innerHTML =
+                    "<div class='text-blue-400 animate-pulse'>Processing...</div>";
+
+                fetch(endpoint, {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    }},
+                    body: params.toString()
+                }})
+                .then(response => response.text())
+                .then(html => {{
+                    document.getElementById('account-result').innerHTML = html;
+                }})
+                .catch(error => {{
+                    document.getElementById('account-result').innerHTML =
+                        "<div class='text-red-400'>Request failed: " + error + "</div>";
+                }});
+            }}
+        </script>
+        "##,
+        wallet_opts = wallet_opts,
+        asset_opts = asset_opts
     )
 }
