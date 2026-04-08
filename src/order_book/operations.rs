@@ -217,43 +217,42 @@ pub async fn settle_order(
             maker_order.id,
             maker_order.bid_asset,
             trade.maker_filled_amount.clone()
-        ).await?;
+        )?;
 
         let maker_ask_fill = update_order_fill(
             conn,
             maker_order.id,
             maker_order.ask_asset,
             trade.taker_filled_amount.clone()
-        ).await?;
+        )?;
 
         let maker_order_status = close_order(
             conn,
             maker_order.id,
             maker_bid_fill,
             maker_ask_fill
-        ).await?;
+        )?;
 
         let taker_bid_fill = update_order_fill(
             conn,
             taker_order.id,
             taker_order.bid_asset,
             trade.taker_filled_amount.clone()
-        ).await?;
+        )?;
 
         let taker_ask_fill = update_order_fill(
             conn,
             taker_order.id,
             taker_order.ask_asset,
             trade.maker_filled_amount.clone()
-        ).await?;
+        )?;
 
-        
         let taker_order_status = close_order(
             conn,
             taker_order.id,
             taker_bid_fill,
             taker_ask_fill
-        ).await?;
+        )?;
         
 
         println!("Taker Order Status:: {:?} Maker Order Status {:?}", taker_order_status, maker_order_status);
@@ -417,8 +416,9 @@ pub async fn settle_onchain(
         None
     )?;
 
-    let maker_amount_less_fee = (0.995 * (maker_transfer_amount as f64)) as u64; 
-    let taker_amount_less_fee = (0.995 * (taker_transfer_amount as f64)) as u64; 
+    // 0.5% fee using integer arithmetic to avoid f64 precision loss
+    let maker_amount_less_fee = maker_transfer_amount * 995 / 1000;
+    let taker_amount_less_fee = taker_transfer_amount * 995 / 1000;
 
     record_transaction(
         conn,
@@ -472,7 +472,7 @@ pub fn record_settled_order(
 
 
 
-pub async fn update_order_fill(
+pub fn update_order_fill(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     order_id: Uuid,
     filled_asset: Uuid,
@@ -531,7 +531,7 @@ pub async fn update_order_fill(
 }
 
 
-pub async fn close_order(
+pub fn close_order(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     order_id: Uuid,
     bid: (BigDecimal, BigDecimal),

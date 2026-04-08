@@ -88,7 +88,7 @@ fn parse_time_series_interval(
         "4hr" => Ok(TimeSeriesInterval::FourHours),
         "1day" => Ok(TimeSeriesInterval::OneDay),
         "1week" => Ok(TimeSeriesInterval::OneWeek),
-        "15secs"=>Ok(TimeSeriesInterval::FifteenMinutes),
+        "15secs"=>Ok(TimeSeriesInterval::FifteenSecs),
         "30secs"=>Ok(TimeSeriesInterval::ThirtySecs),
         "45secs"=>Ok(TimeSeriesInterval::FortyFiveSecs),
         _ => Err(ApiError::bad_request(

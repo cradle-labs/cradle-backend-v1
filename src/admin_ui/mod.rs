@@ -600,13 +600,13 @@ async fn place_order_handler(
     let ask_multiplier = BigDecimal::from(10i64.pow(ask_asset.decimals as u32));
     
     let (bid_amt, ask_amt) = if form.side == "buy" {
-        // Buying: bid_amt = amount * price (both in bid decimals), ask_amt = amount (in ask decimals)
+        // Buying: bid_amt = amount in bid asset decimals, ask_amt = amount * price in ask asset decimals
         (
-            (amount.clone() * ask_multiplier),
-            (amount.clone() * price.clone() * bid_multiplier.clone())
+            (amount.clone() * bid_multiplier.clone()),
+            (amount.clone() * price.clone() * ask_multiplier.clone())
         )
     } else {
-        // Selling: bid_amt = amount (in bid decimals), ask_amt = amount * price (price in bid decimals, convert to ask)
+        // Selling: bid_amt = amount * price in bid asset decimals, ask_amt = amount in ask asset decimals
         (
             (amount.clone() * price.clone() * bid_multiplier.clone()),
             (amount.clone() * ask_multiplier)
