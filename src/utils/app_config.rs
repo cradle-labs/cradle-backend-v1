@@ -5,12 +5,25 @@ use anyhow::{anyhow, Result};
 use contract_integrator::wallet::wallet::ActionWallet;
 use dotenvy::dotenv;
 use socketioxide::SocketIo;
+use crate::utils::cache::RedisPool;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppConfig {
     pub pool: diesel::r2d2::Pool<ConnectionManager<PgConnection>>,
     pub wallet: ActionWallet,
+    pub redis: Option<RedisPool>,
     io: Option<SocketIo>
+}
+
+impl std::fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("pool", &self.pool)
+            .field("wallet", &self.wallet)
+            .field("redis", &self.redis.as_ref().map(|_| "RedisPool(connected)"))
+            .field("io", &self.io)
+            .finish()
+    }
 }
 
 impl AppConfig {
@@ -18,6 +31,7 @@ impl AppConfig {
         Self {
             pool,
             wallet,
+            redis: None,
             io: None
         }
     }
@@ -41,5 +55,9 @@ impl AppConfig {
 
     pub fn get_io(&self)->Result<SocketIo> {
         self.io.clone().ok_or_else(||anyhow!("Failed to get socket io"))
+    }
+
+    pub fn set_redis(&mut self, redis: RedisPool) {
+        self.redis = Some(redis);
     }
 }

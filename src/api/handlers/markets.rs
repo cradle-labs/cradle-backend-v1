@@ -13,7 +13,7 @@ use crate::{
     },
     action_router::{ActionRouterInput, ActionRouterOutput},
     api::{error::ApiError, response::ApiResponse},
-    utils::app_config::AppConfig,
+    utils::{app_config::AppConfig, cache},
 };
 
 /// Query parameters for filtering markets
@@ -33,10 +33,18 @@ pub async fn get_market_by_id(
     let market_id = uuid::Uuid::parse_str(&id)
         .map_err(|_| ApiError::bad_request("Invalid market ID format"))?;
 
+    let cache_key = format!("market:{}", market_id);
+
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse::success(cached))));
+        }
+    }
+
     let action = ActionRouterInput::Markets(MarketProcessorInput::GetMarket(market_id));
 
     let result = action
-        .process(app_config)
+        .process(app_config.clone())
         .await
         .map_err(|_| ApiError::not_found("Market"))?;
 
@@ -46,6 +54,11 @@ pub async fn get_market_by_id(
                 MarketProcessorOutput::GetMarket(market) => {
                     let json = serde_json::to_value(&market)
                         .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+                    if let Some(redis) = &app_config.redis {
+                        cache::cache_set(redis, &cache_key, &json, 600).await;
+                    }
+
                     Ok((StatusCode::OK, Json(ApiResponse::success(json))))
                 }
                 _ => Err(ApiError::internal_error("Unexpected response type")),
@@ -60,6 +73,14 @@ pub async fn get_markets(
     State(app_config): State<AppConfig>,
     Query(_params): Query<MarketFilterParams>,
 ) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
+    let cache_key = "markets:all";
+
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse::success(cached))));
+        }
+    }
+
     let mut conn = app_config
         .pool
         .get()
@@ -71,6 +92,10 @@ pub async fn get_markets(
 
     let json = serde_json::to_value(&results)
         .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+    if let Some(redis) = &app_config.redis {
+        cache::cache_set(redis, cache_key, &json, 600).await;
+    }
 
     Ok((StatusCode::OK, Json(ApiResponse::success(json))))
 }

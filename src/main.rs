@@ -70,6 +70,18 @@ async fn main() -> anyhow::Result<()> {
     // Load AppConfig (database and wallet)
     let mut app_config = AppConfig::from_env()?;
     app_config.set_io(io);
+
+    // Initialize Redis cache (optional — runs without it)
+    match utils::cache::init_redis().await {
+        Ok(redis) => {
+            app_config.set_redis(redis);
+            tracing::info!("Redis cache connected");
+        }
+        Err(e) => {
+            tracing::warn!("Redis unavailable, running without cache: {}", e);
+        }
+    }
+
     tracing::info!("Application configuration loaded successfully");
 
     // Create authentication middleware that captures the secret key
