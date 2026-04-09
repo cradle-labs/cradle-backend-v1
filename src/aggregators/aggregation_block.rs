@@ -1,6 +1,5 @@
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
-use clap::Parser;
 use serde::{Deserialize, Serialize};
 use diesel::PgConnection;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
@@ -28,10 +27,12 @@ pub enum TimeSeriesAggregatorIntervals {
     #[serde(rename="4hr")]
     FourHours,
     #[serde(rename="1day")]
-    OneDay
+    OneDay,
+    #[serde(rename="1week")]
+    OneWeek
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct OHLCBlock {
     pub open: BigDecimal,
     pub high: BigDecimal,
@@ -39,7 +40,23 @@ pub struct OHLCBlock {
     pub close: BigDecimal,
     pub volume: BigDecimal,
     pub market: String,
-    pub asset: String
+    pub asset: String,
+    pub start_time: Option<NaiveDateTime>,
+}
+
+impl Default for OHLCBlock {
+    fn default() -> Self {
+        Self {
+            open: BigDecimal::from(0),
+            high: BigDecimal::from(0),
+            low: BigDecimal::from(0),
+            close: BigDecimal::from(0),
+            volume: BigDecimal::from(0),
+            market: String::new(),
+            asset: String::new(),
+            start_time: None,
+        }
+    }
 }
 
 impl OHLCBlock {
@@ -50,15 +67,14 @@ impl OHLCBlock {
         }
 
         // For OHLC aggregation from sub-blocks:
-        // - Open: open price of first block
+        // - Open: open price of first block (by time)
         // - High: max high price across all blocks
         // - Low: min low price across all blocks
-        // - Close: close price of last block
+        // - Close: close price of last block (by time)
         // - Volume: sum of all volumes
         let mut sorted_blocks = blocks.clone();
         sorted_blocks.sort_by(|a, b| {
-            // Assume blocks are already in order, but be safe
-            a.open.cmp(&b.open)
+            a.start_time.cmp(&b.start_time)
         });
 
         let open = sorted_blocks.first().map(|b| b.open.clone()).unwrap_or_default();
@@ -84,6 +100,7 @@ impl OHLCBlock {
             volume,
             market: sorted_blocks.first().map(|b| b.market.clone()).unwrap_or_default(),
             asset: sorted_blocks.first().map(|b| b.asset.clone()).unwrap_or_default(),
+            start_time: sorted_blocks.first().and_then(|b| b.start_time),
         }
     }
 }
@@ -103,53 +120,44 @@ pub struct AggregationBlock {
 impl AggregationBlock {
 
     pub fn process(&self, conn: &mut PooledConnection<ConnectionManager<PgConnection>>) -> anyhow::Result<OHLCBlock> {
-        match self.interval {
-            TimeSeriesAggregatorIntervals::FifteenSeconds => {
-                // Base case: query raw trades and compute OHLC
-                use crate::aggregators::ohlc_queries;
+        // Query raw trades directly for this block's time range, regardless of interval.
+        // This is correct and efficient: the DB filters trades by [start, end),
+        // and we compute OHLC over whatever trades fall in that window.
+        use crate::aggregators::ohlc_queries;
 
-                let trades = ohlc_queries::get_trades_for_market_asset(
-                    self.market_id,
-                    self.asset_id,
-                    self.start,
-                    self.end,
-                    conn,
-                )?;
+        let trades = ohlc_queries::get_trades_for_market_asset(
+            self.market_id,
+            self.asset_id,
+            self.start,
+            self.end,
+            conn,
+        )?;
 
-                if trades.is_empty() {
-                    // Return empty OHLC block if no trades
-                    return Ok(OHLCBlock {
-                        open: BigDecimal::from(0),
-                        high: BigDecimal::from(0),
-                        low: BigDecimal::from(0),
-                        close: BigDecimal::from(0),
-                        volume: BigDecimal::from(0),
-                        market: self.market_id.to_string(),
-                        asset: self.asset_id.to_string(),
-                    });
-                }
-
-                let (open, high, low, close, volume) = ohlc_queries::calculate_ohlc(&trades)?;
-
-                Ok(OHLCBlock {
-                    open,
-                    high,
-                    low,
-                    close,
-                    volume,
-                    market: self.market_id.to_string(),
-                    asset: self.asset_id.to_string(),
-                })
-            }
-            _ => {
-                // Recursive case: aggregate sub-blocks
-                let res: Vec<OHLCBlock> = self.sub_blocks.iter()
-                    .map(|block| block.process(conn))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Ok(OHLCBlock::sum(res))
-            }
+        if trades.is_empty() {
+            return Ok(OHLCBlock {
+                open: BigDecimal::from(0),
+                high: BigDecimal::from(0),
+                low: BigDecimal::from(0),
+                close: BigDecimal::from(0),
+                volume: BigDecimal::from(0),
+                market: self.market_id.to_string(),
+                asset: self.asset_id.to_string(),
+                start_time: Some(self.start),
+            });
         }
+
+        let (open, high, low, close, volume) = ohlc_queries::calculate_ohlc(&trades)?;
+
+        Ok(OHLCBlock {
+            open,
+            high,
+            low,
+            close,
+            volume,
+            market: self.market_id.to_string(),
+            asset: self.asset_id.to_string(),
+            start_time: Some(self.start),
+        })
     }
 
 }

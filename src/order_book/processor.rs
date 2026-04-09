@@ -14,8 +14,50 @@ use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::PgConnection;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
+use serde::Serialize;
 use std::env;
 use uuid::Uuid;
+
+#[derive(Serialize, Clone, Debug)]
+struct OrderEvent {
+    id: Uuid,
+    market_id: Uuid,
+    wallet: Uuid,
+    bid_asset: Uuid,
+    ask_asset: Uuid,
+    bid_amount: String,
+    ask_amount: String,
+    price: String,
+    status: String,
+    order_type: String,
+}
+
+impl From<&OrderBookRecord> for OrderEvent {
+    fn from(order: &OrderBookRecord) -> Self {
+        Self {
+            id: order.id,
+            market_id: order.market_id,
+            wallet: order.wallet,
+            bid_asset: order.bid_asset,
+            ask_asset: order.ask_asset,
+            bid_amount: order.bid_amount.to_string(),
+            ask_amount: order.ask_amount.to_string(),
+            price: order.price.to_string(),
+            status: format!("{:?}", order.status),
+            order_type: format!("{:?}", order.order_type),
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+struct TradeEvent {
+    order_id: Uuid,
+    market_id: Uuid,
+    trade_ids: Vec<Uuid>,
+    bid_amount_filled: String,
+    ask_amount_filled: String,
+    status: String,
+}
 
 impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookProcessorInput {
     async fn process(
@@ -78,6 +120,13 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     .values(args.clone())
                     .get_result::<OrderBookRecord>(app_conn)?;
 
+                // Emit order:placed event
+                if let Ok(io) = app_config.get_io() {
+                    let event = OrderEvent::from(&order);
+                    let room = format!("orderbook:{}", order.market_id);
+                    let _ = io.to(room).emit("order:placed", &event).await;
+                }
+
                 let matching_orders = get_matching_orders(app_conn, order.id).await?;
                 let (remaining_bid, unfilled_ask, trades) =
                     get_order_fill_trades(&order, matching_orders);
@@ -94,6 +143,14 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     println!("killing order");
                     update_order_status(app_config, app_conn, order.id, OrderStatus::Cancelled)
                         .await?;
+
+                    // Emit order:cancelled event
+                    if let Ok(io) = app_config.get_io() {
+                        let mut event = OrderEvent::from(&order);
+                        event.status = "Cancelled".to_string();
+                        let room = format!("orderbook:{}", order.market_id);
+                        let _ = io.to(room).emit("order:cancelled", &event).await;
+                    }
 
                     return Ok(OrderBookProcessorOutput::PlaceOrder(OrderFillResult {
                         id: order.id,
@@ -140,11 +197,50 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                     OrderFillStatus::Partial
                 };
 
+                let bid_filled = &order.bid_amount - &remaining_bid;
+                let ask_filled = &order.ask_amount - &unfilled_ask;
+
+                // Emit trade:executed if any trades matched
+                if !matched_trades.is_empty() {
+                    if let Ok(io) = app_config.get_io() {
+                        let trade_event = TradeEvent {
+                            order_id: order.id,
+                            market_id: order.market_id,
+                            trade_ids: matched_trades.clone(),
+                            bid_amount_filled: bid_filled.to_string(),
+                            ask_amount_filled: ask_filled.to_string(),
+                            status: format!("{:?}", final_status),
+                        };
+                        let trades_room = format!("trades:{}", order.market_id);
+                        let _ = io.to(trades_room).emit("trade:executed", &trade_event).await;
+                    }
+                }
+
+                // Emit order status event
+                if let Ok(io) = app_config.get_io() {
+                    let room = format!("orderbook:{}", order.market_id);
+                    let mut event = OrderEvent::from(&order);
+                    match final_status {
+                        OrderFillStatus::Filled => {
+                            event.status = "Closed".to_string();
+                            let _ = io.to(room).emit("order:filled", &event).await;
+                        }
+                        OrderFillStatus::Partial => {
+                            event.status = "Open".to_string();
+                            let _ = io.to(room).emit("order:updated", &event).await;
+                        }
+                        OrderFillStatus::Cancelled => {
+                            event.status = "Cancelled".to_string();
+                            let _ = io.to(room).emit("order:cancelled", &event).await;
+                        }
+                    }
+                }
+
                 Ok(OrderBookProcessorOutput::PlaceOrder(OrderFillResult {
                     id: order.id,
                     status: final_status,
-                    bid_amount_filled: order.bid_amount - remaining_bid,
-                    ask_amount_filled: order.ask_amount - unfilled_ask,
+                    bid_amount_filled: bid_filled,
+                    ask_amount_filled: ask_filled,
                     matched_trades,
                 }))
             }

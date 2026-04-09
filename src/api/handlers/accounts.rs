@@ -12,7 +12,7 @@ use crate::{
     accounts::processor_enums::{AccountsProcessorInput, AccountsProcessorOutput, GetAccountInputArgs, GetWalletInputArgs},
     action_router::{ActionRouterInput, ActionRouterOutput},
     api::{error::ApiError, response::ApiResponse},
-    utils::app_config::AppConfig,
+    utils::{app_config::AppConfig, cache},
 };
 
 /// GET /accounts/{id} - Get account by UUID
@@ -175,6 +175,14 @@ pub async fn api_get_account_balances(
     State(app_state): State<AppConfig>,
     Path(wallet_id): Path<String>
 ) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
+    let cache_key = format!("balances:{}", wallet_id);
+
+    // Check cache first — avoids expensive Hedera call
+    if let Some(redis) = &app_state.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse::success(cached))));
+        }
+    }
 
     #[derive(Serialize, Deserialize)]
     struct Balance {
@@ -200,8 +208,12 @@ pub async fn api_get_account_balances(
         })
     }
 
-
-
     let data_value = serde_json::to_value(&all_balances).unwrap_or(serde_json::to_value::<Vec<Balance>>(Vec::new()).map_err(|_|ApiError::internal_error("Unable to get data"))?);
+
+    // Cache for 30 seconds
+    if let Some(redis) = &app_state.redis {
+        cache::cache_set(redis, &cache_key, &data_value, 30).await;
+    }
+
     Ok((StatusCode::OK, Json(ApiResponse::success(json!(data_value)))))
 }

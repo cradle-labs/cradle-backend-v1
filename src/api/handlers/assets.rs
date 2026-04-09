@@ -8,7 +8,7 @@ use crate::{
     asset_book::processor_enums::{
         AssetBookProcessorInput, AssetBookProcessorOutput, GetAssetInputArgs,
     },
-    utils::app_config::AppConfig,
+    utils::{app_config::AppConfig, cache},
 };
 use axum::{
     Json,
@@ -30,12 +30,21 @@ pub async fn get_asset_by_id(
     let asset_id =
         uuid::Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("Invalid asset ID format"))?;
 
+    let cache_key = format!("asset:{}", asset_id);
+
+    // Check cache first
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse::success(cached))));
+        }
+    }
+
     let action = ActionRouterInput::AssetBook(AssetBookProcessorInput::GetAsset(
         GetAssetInputArgs::ById(asset_id),
     ));
 
     let result = action
-        .process(app_config)
+        .process(app_config.clone())
         .await
         .map_err(|_| ApiError::not_found("Asset"))?;
 
@@ -44,6 +53,12 @@ pub async fn get_asset_by_id(
             AssetBookProcessorOutput::GetAsset(asset) => {
                 let json = serde_json::to_value(&asset)
                     .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+                // Cache for 1 hour — asset metadata rarely changes
+                if let Some(redis) = &app_config.redis {
+                    cache::cache_set(redis, &cache_key, &json, 3600).await;
+                }
+
                 Ok((StatusCode::OK, Json(ApiResponse::success(json))))
             }
             _ => Err(ApiError::internal_error("Unexpected response type")),
@@ -109,7 +124,15 @@ pub async fn get_asset_by_manager(
 pub async fn get_assets(
     State(app_config): State<AppConfig>,
 ) -> Result<(StatusCode, Json<ApiResponse<serde_json::Value>>), ApiError> {
-    use crate::schema::asset_book::dsl::*;
+    let cache_key = "assets:all";
+
+    // Check cache first
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse::success(cached))));
+        }
+    }
+
     let mut conn = app_config
         .pool
         .get()
@@ -119,6 +142,11 @@ pub async fn get_assets(
         .map_err(|e| ApiError::internal_error(format!("Error::{}", e)))?;
     let jsonified = serde_json::to_value(&results)
         .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+    // Cache for 1 hour
+    if let Some(redis) = &app_config.redis {
+        cache::cache_set(redis, cache_key, &jsonified, 3600).await;
+    }
 
     Ok((StatusCode::OK, Json(ApiResponse::success(jsonified))))
 }
@@ -135,6 +163,15 @@ pub async fn get_asset_balance(
     State(app_config): State<AppConfig>,
     Path((wallet_id, asset_id)): Path<(Uuid, Uuid)>,
 ) -> Result<(StatusCode, Json<ApiResponse<AssetBalance>>), ApiError> {
+    let cache_key = format!("balance:{}:{}", wallet_id, asset_id);
+
+    // Check cache first — avoids expensive Hedera call
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<AssetBalance>(redis, &cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse { success: true, data: Some(cached), error: None })));
+        }
+    }
+
     // TODO: add support for hbar and other native tokens
     let mut conn = app_config
         .pool
@@ -184,6 +221,11 @@ pub async fn get_asset_balance(
         deductions: deductions_u64,
         decimals: asset.decimals as u64,
     };
+
+    // Cache for 30 seconds — balances change on transactions
+    if let Some(redis) = &app_config.redis {
+        cache::cache_set(redis, &cache_key, &res, 30).await;
+    }
 
     Ok((
         StatusCode::OK,

@@ -13,7 +13,7 @@ use crate::{
     },
     action_router::{ActionRouterInput, ActionRouterOutput},
     api::{error::ApiError, response::ApiResponse},
-    utils::app_config::AppConfig,
+    utils::{app_config::AppConfig, cache},
 };
 
 /// Query parameters for time series history
@@ -43,6 +43,15 @@ pub async fn get_time_series_history(
 
     let asset_id = Uuid::parse_str(params.asset_id.as_str()).map_err(|_| ApiError::internal_error("failed to parse asset_id"))?;
 
+    let cache_key = format!("timeseries:{}:{}:{}:{}", market_id, asset_id, params.interval, params.duration_secs);
+
+    // Check cache — timeseries queries can be expensive
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            return Ok((StatusCode::OK, Json(ApiResponse::success(cached))));
+        }
+    }
+
     let action = ActionRouterInput::MarketTimeSeries(
         MarketTimeSeriesProcessorInput::GetHistory(
             crate::market_time_series::processor_enum::GetHistoryInputArgs {
@@ -55,7 +64,7 @@ pub async fn get_time_series_history(
     );
 
     let result = action
-        .process(app_config)
+        .process(app_config.clone())
         .await
         .map_err(|e| ApiError::database_error(format!("Failed to fetch time series data: {}", e)))?;
 
@@ -65,6 +74,12 @@ pub async fn get_time_series_history(
                 MarketTimeSeriesProcessorOutput::GetHistory(records) => {
                     let json = serde_json::to_value(&records)
                         .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;
+
+                    // Cache for 15 seconds — fresh candles arrive regularly
+                    if let Some(redis) = &app_config.redis {
+                        cache::cache_set(redis, &cache_key, &json, 15).await;
+                    }
+
                     Ok((StatusCode::OK, Json(ApiResponse::success(json))))
                 }
                 _ => Err(ApiError::internal_error("Unexpected response type")),
@@ -88,7 +103,7 @@ fn parse_time_series_interval(
         "4hr" => Ok(TimeSeriesInterval::FourHours),
         "1day" => Ok(TimeSeriesInterval::OneDay),
         "1week" => Ok(TimeSeriesInterval::OneWeek),
-        "15secs"=>Ok(TimeSeriesInterval::FifteenMinutes),
+        "15secs"=>Ok(TimeSeriesInterval::FifteenSecs),
         "30secs"=>Ok(TimeSeriesInterval::ThirtySecs),
         "45secs"=>Ok(TimeSeriesInterval::FortyFiveSecs),
         _ => Err(ApiError::bad_request(

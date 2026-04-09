@@ -143,7 +143,7 @@ fn create_aggregation_block(
         TimeSeriesInterval::OneHour => crate::aggregators::TimeSeriesAggregatorIntervals::OneHour,
         TimeSeriesInterval::FourHours => crate::aggregators::TimeSeriesAggregatorIntervals::FourHours,
         TimeSeriesInterval::OneDay => crate::aggregators::TimeSeriesAggregatorIntervals::OneDay,
-        TimeSeriesInterval::OneWeek => crate::aggregators::TimeSeriesAggregatorIntervals::OneDay,
+        TimeSeriesInterval::OneWeek => crate::aggregators::TimeSeriesAggregatorIntervals::OneWeek,
     };
 
     Ok(AggregationBlock {

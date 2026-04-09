@@ -25,7 +25,7 @@ use crate::{
     },
     map_to_api_error,
     schema::lendingpoolsnapshots::lending_pool_id,
-    utils::app_config::AppConfig,
+    utils::{app_config::AppConfig, cache},
 };
 use uuid::Uuid;
 
@@ -112,11 +112,21 @@ pub async fn get_loans_handler(
     ))
 }
 
-// TODO: add a caching layer
 pub async fn get_pool_stats_handler(
     State(app_config): State<AppConfig>,
     Path(pool_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<GetPoolStatsOutput>>), ApiError> {
+    let cache_key = format!("pool_stats:{}", pool_id);
+
+    // Check cache — pool stats require expensive Hedera calls
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            if let Ok(stats) = serde_json::from_value::<GetPoolStatsOutput>(cached) {
+                return Ok((StatusCode::OK, Json(ApiResponse { success: true, data: Some(stats), error: None })));
+            }
+        }
+    }
+
     let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
     let mut wallet = app_config.wallet.clone();
 
@@ -125,6 +135,11 @@ pub async fn get_pool_stats_handler(
         "Failed to get stats"
     )?;
 
+    // Cache for 30 seconds — pool stats change with blockchain state
+    if let Some(redis) = &app_config.redis {
+        cache::cache_set(redis, &cache_key, &results, 30).await;
+    }
+
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
@@ -135,11 +150,20 @@ pub async fn get_pool_stats_handler(
     ))
 }
 
-// TODO: add a caching layer
 pub async fn get_pool_borrow_positions(
     State(app_config): State<AppConfig>,
     Path(loan_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<GetUserBorrowPositionOutput>>), ApiError> {
+    let cache_key = format!("loan_position:{}", loan_id);
+
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            if let Ok(pos) = serde_json::from_value::<GetUserBorrowPositionOutput>(cached) {
+                return Ok((StatusCode::OK, Json(ApiResponse { success: true, data: Some(pos), error: None })));
+            }
+        }
+    }
+
     let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
     let mut wallet = app_config.wallet.clone();
 
@@ -148,6 +172,11 @@ pub async fn get_pool_borrow_positions(
         "Failed to get loan"
     )?;
 
+    // Cache for 15 seconds — positions change frequently
+    if let Some(redis) = &app_config.redis {
+        cache::cache_set(redis, &cache_key, &results, 15).await;
+    }
+
     Ok((
         StatusCode::OK,
         Json(ApiResponse {
@@ -158,11 +187,20 @@ pub async fn get_pool_borrow_positions(
     ))
 }
 
-// TODO: add a caching layer
 pub async fn get_pool_deposit_handler(
     State(app_config): State<AppConfig>,
     Path((pool_id, wallet_id)): Path<(Uuid, Uuid)>,
 ) -> Result<(StatusCode, Json<ApiResponse<GetUserDepositPositonOutput>>), ApiError> {
+    let cache_key = format!("deposit_position:{}:{}", pool_id, wallet_id);
+
+    if let Some(redis) = &app_config.redis {
+        if let Some(cached) = cache::cache_get::<serde_json::Value>(redis, &cache_key).await {
+            if let Ok(pos) = serde_json::from_value::<GetUserDepositPositonOutput>(cached) {
+                return Ok((StatusCode::OK, Json(ApiResponse { success: true, data: Some(pos), error: None })));
+            }
+        }
+    }
+
     let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
     let mut wallet = app_config.wallet.clone();
 
@@ -170,6 +208,11 @@ pub async fn get_pool_deposit_handler(
         get_pool_deposit_position(&mut wallet, &mut conn, pool_id, wallet_id).await,
         "Failed to get loan"
     )?;
+
+    // Cache for 15 seconds
+    if let Some(redis) = &app_config.redis {
+        cache::cache_set(redis, &cache_key, &results, 15).await;
+    }
 
     Ok((
         StatusCode::OK,
