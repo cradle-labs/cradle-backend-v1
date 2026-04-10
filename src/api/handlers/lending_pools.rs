@@ -32,16 +32,15 @@ use uuid::Uuid;
 pub async fn get_pools(
     State(app_config): State<AppConfig>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<LendingPoolRecord>>>), ApiError> {
-    let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
-
-    let results = map_to_api_error!(
-        {
-            use crate::schema::lendingpool::dsl::*;
-
-            lendingpool.get_results::<LendingPoolRecord>(&mut conn)
-        },
-        "Failed to get lending pool"
-    )?;
+    let pool = app_config.pool.clone();
+    let results = tokio::task::spawn_blocking(move || {
+        use crate::schema::lendingpool::dsl::*;
+        let mut conn = pool.get()?;
+        lendingpool.get_results::<LendingPoolRecord>(&mut conn).map_err(anyhow::Error::from)
+    })
+    .await
+    .map_err(|e| ApiError::internal_error(format!("Task join error: {}", e)))?
+    .map_err(|e| ApiError::internal_error(format!("Failed to get lending pool: {}", e)))?;
 
     // Temporary for demo
     let filtered = results.into_iter().filter(|v|v.id != Uuid::from_str("594c6d07-4da6-4391-984f-1edf4ba4b64a").unwrap()).collect::<Vec<LendingPoolRecord>>();
@@ -61,18 +60,18 @@ pub async fn get_pool(
     State(app_config): State<AppConfig>,
     Path(id_value): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<LendingPoolRecord>>), ApiError> {
-    let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
-
-    let result = map_to_api_error!(
-        {
-            use crate::schema::lendingpool::dsl::*;
-
-            lendingpool
-                .filter(id.eq(id_value))
-                .get_result::<LendingPoolRecord>(&mut conn)
-        },
-        "Failed to get pool"
-    )?;
+    let pool = app_config.pool.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        use crate::schema::lendingpool::dsl::*;
+        let mut conn = pool.get()?;
+        lendingpool
+            .filter(id.eq(id_value))
+            .get_result::<LendingPoolRecord>(&mut conn)
+            .map_err(anyhow::Error::from)
+    })
+    .await
+    .map_err(|e| ApiError::internal_error(format!("Task join error: {}", e)))?
+    .map_err(|e| ApiError::internal_error(format!("Failed to get pool: {}", e)))?;
 
     Ok((
         StatusCode::OK,
@@ -88,19 +87,19 @@ pub async fn get_loans_handler(
     State(app_config): State<AppConfig>,
     Path(wallet_id_value): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ApiResponse<Vec<LoanRecord>>>), ApiError> {
-    let mut conn = map_to_api_error!(app_config.pool.get(), "Failed to acquire db conn")?;
-    let mut wallet = app_config.wallet.clone();
-
-    let loans = map_to_api_error!(
-        {
-            use crate::schema::loans::dsl::*;
-
-            loans
-                .filter(wallet_id.eq(wallet_id_value))
-                .get_results::<LoanRecord>(&mut conn)
-        },
-        "Failed to retrieve loans"
-    )?;
+    let db_pool = app_config.pool.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        use crate::schema::loans::dsl::*;
+        let mut conn = db_pool.get()?;
+        loans
+            .filter(wallet_id.eq(wallet_id_value))
+            .get_results::<LoanRecord>(&mut conn)
+            .map_err(anyhow::Error::from)
+    })
+    .await
+    .map_err(|e| ApiError::internal_error(format!("Task join error: {}", e)))?
+    .map_err(|e| ApiError::internal_error(format!("Failed to retrieve loans: {}", e)))?;
+    let loans = result;
 
     Ok((
         StatusCode::OK,

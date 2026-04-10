@@ -68,8 +68,7 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                                 wallet_id: wallet_data.id,
                             },
                         )),
-                        Err(e) => {
-                            println!("Failed to create wallet");
+                        Err(_e) => {
                             match delete_account(
                                 action_conn,
                                 DeleteAccountInputArgs::ById(account_id),
@@ -112,17 +111,11 @@ impl ActionProcessor<AccountProcessorConfig, AccountsProcessorOutput> for Accoun
                             .output
                             .ok_or_else(|| anyhow!("Failed to get wallet address"))?
                             .account_address;
-                        println!(
-                            "Wallet contract address:: {}",
-                            wallet_contract_address.clone()
-                        );
                         let contract_id_value = commons::get_contract_id_from_evm_address(
                             wallet_contract_address.as_str(),
                         )
                         .await?;
-                        println!("Contract ID: {:?}", contract_id_value.clone());
                         let as_str_value = contract_id_value.to_string();
-                        println!("Contract ID as String: {}", as_str_value);
                         let action_data = super::db_types::CreateCradleWalletAccount {
                             cradle_account_id: args.cradle_account_id.clone(),
                             contract_id: as_str_value,

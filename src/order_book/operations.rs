@@ -201,14 +201,11 @@ pub async fn settle_order(
         ).await {
             Ok(tx)=>tx,
             Err(e)=>{
-                println!("Settlement Failed with error:: {:?}", e);
+                tracing::error!("Settlement failed: {:?}", e);
                 // TODO: add more graceful error handling so that the amount that eventually gets unlocked is valid
                 continue;
             }
         };
-
-
-        println!("Settlement tx id :: {:?}", settlement_tx_id);
 
         record_settled_order(conn, trade.id, settlement_tx_id.clone())?;
 
@@ -247,20 +244,14 @@ pub async fn settle_order(
             trade.maker_filled_amount.clone()
         )?;
 
-        let taker_order_status = close_order(
+        let _taker_order_status = close_order(
             conn,
             taker_order.id,
             taker_bid_fill,
             taker_ask_fill
         )?;
-        
 
-        println!("Taker Order Status:: {:?} Maker Order Status {:?}", taker_order_status, maker_order_status);
-
-             
-
-           
-        
+        let _ = maker_order_status;
     }
 
     
@@ -365,13 +356,7 @@ pub async fn settle_onchain(
     let maker_transfer_amount = _maker_transfer_amount.to_u64().ok_or_else(||anyhow!("value too big"))?;
     let taker_transfer_amount = _taker_transfer_amount.to_u64().ok_or_else(||anyhow!("value too big"))?;
 
-    println!("Maker Address:: {:?} ", maker.address.clone());
-    println!("Taker Address:: {:?}", taker.address.clone());
-    println!("Bid Asset:: {:?}", maker_transfer_asset.token.clone());
-    println!("Ask Asset:: {:?} ", taker_transfer_asset.token.clone());
-    println!("Bid Amount:: {:?} ", maker_transfer_amount.to_string());
-    println!("Ask Amount:: {:?} ", taker_transfer_amount.to_string());
-    
+
     let res = wallet.execute(
        ContractCallInput::OrderBookSettler(
            orderbook_settler::OrderBookSettlerFunctionInput::SettleOrder(

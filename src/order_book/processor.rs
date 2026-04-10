@@ -130,17 +130,10 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                 let matching_orders = get_matching_orders(app_conn, order.id).await?;
                 let (remaining_bid, unfilled_ask, trades) =
                     get_order_fill_trades(&order, matching_orders);
-                println!("Order trades :: {:?}", trades.clone());
-                println!(
-                    "Remaining Bid {:?}, Unfilled ask {:?}",
-                    remaining_bid.clone(),
-                    unfilled_ask.clone()
-                );
                 // Handle FillOrKill
                 if let Some(FillMode::FillOrKill) = args.mode
                     && (remaining_bid > BigDecimal::from(0) || unfilled_ask > BigDecimal::from(0))
                 {
-                    println!("killing order");
                     update_order_status(app_config, app_conn, order.id, OrderStatus::Cancelled)
                         .await?;
 
@@ -168,16 +161,11 @@ impl ActionProcessor<OrderBookConfig, OrderBookProcessorOutput> for OrderBookPro
                         .values(trade)
                         .returning(orderbooktrades::id)
                         .get_result::<Uuid>(app_conn)?;
-                    println!("Matched trade :: {:?}", id);
                     matched_trades.push(id);
                 }
 
-                println!("about to settle order");
                 // Settle orders
-
                 settle_order(&mut app_config.wallet, app_conn, order.id).await?;
-
-                println!("matched and settled trades");
 
                 // Handle ImmediateOrCancel after settlement
                 let final_status = if let Some(FillMode::ImmediateOrCancel) = args.mode {

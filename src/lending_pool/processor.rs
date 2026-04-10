@@ -258,7 +258,6 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     .filter(id.eq(args.collateral))
                     .get_result::<AssetBookRecord>(app_conn)?;
 
-                println!("checkpoint-1");
 
                 // auto associate and grant kyc to account for user
                 associate_token(
@@ -283,7 +282,6 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
 
                 
 
-                println!("checkpoint-2");
 
                 let output = contract_integrator::operations::asset_lending::borrow(
                     BorrowArgs {
@@ -300,7 +298,6 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     AssetLendingPoolFunctionsOutput::Borrow(output.clone()),
                 );
 
-                println!("checkpoint-3");
                 record_transaction(
                     app_conn,
                     Some(wallet.address.clone()),
@@ -316,7 +313,6 @@ impl ActionProcessor<LendingPoolConfig, LendingPoolFunctionsOutput> for LendingP
                     None,
                 )?;
 
-                println!("checkpoint-4");
 
                 let data = output
                     .output
