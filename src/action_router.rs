@@ -16,7 +16,6 @@ use crate::utils::app_config::AppConfig;
 use crate::utils::db::get_conn;
 use crate::utils::traits::ActionProcessor;
 use anyhow::Result;
-use contract_integrator::wallet::wallet::ActionWallet;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -46,9 +45,10 @@ impl ActionRouterInput {
         match self {
             ActionRouterInput::Accounts(processor) => {
                 let mut conn = get_conn(app_config.pool.clone())?;
-                // TODO: possibility of filtering out so conn's only available to necessary processors, future optimization
-                let wallet = ActionWallet::from_env();
-                let mut processor_config = AccountProcessorConfig { wallet };
+                // Reuse the wallet from app_config instead of creating a new one per request.
+                // ActionWallet::from_env() is extremely expensive (parses crypto keys,
+                // initializes a new Hedera Client with network connections).
+                let mut processor_config = AccountProcessorConfig { wallet: app_config.wallet.clone() };
                 let res = processor
                     .process(
                         &mut app_config.clone(),
