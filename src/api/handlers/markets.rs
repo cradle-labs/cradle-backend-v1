@@ -81,14 +81,18 @@ pub async fn get_markets(
         }
     }
 
-    let mut conn = app_config
-        .pool
-        .get()
-        .map_err(|_| ApiError::internal_error("Failed to acquire database connection"))?;
-
-    let results = crate::schema::markets::dsl::markets
-        .get_results::<MarketRecord>(&mut conn)
-        .map_err(|e| ApiError::internal_error(format!("Database error: {}", e)))?;
+    // Move the blocking Diesel query to the blocking thread pool
+    // so it doesn't stall the Tokio worker.
+    let pool = app_config.pool.clone();
+    let results = tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get()?;
+        crate::schema::markets::dsl::markets
+            .get_results::<MarketRecord>(&mut conn)
+            .map_err(anyhow::Error::from)
+    })
+    .await
+    .map_err(|e| ApiError::internal_error(format!("Task join error: {}", e)))?
+    .map_err(|e| ApiError::internal_error(format!("Database error: {}", e)))?;
 
     let json = serde_json::to_value(&results)
         .map_err(|e| ApiError::internal_error(format!("Failed to serialize: {}", e)))?;

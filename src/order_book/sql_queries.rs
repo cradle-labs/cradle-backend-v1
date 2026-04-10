@@ -86,8 +86,6 @@ pub async fn get_matching_orders(
         .bind::<diesel::sql_types::Uuid, _>(&incoming_order)
         .get_results::<MatchingOrderResult>(conn)?;
 
-    println!("Matching Orders :: {:?}", result.clone());
-
     Ok(result)
 }
 
@@ -110,37 +108,21 @@ pub fn get_order_fill_trades(
         let maker_ratio = matching_order.remaining_bid_amount.clone()
             / matching_order.remaining_ask_amount.clone();
 
-        println!("Maker ratio :: {}", maker_ratio.clone());
-
         // use maker's bid as the cap
         let max_by_taker_ask = unfilled_ask
             .clone()
             .min(matching_order.remaining_bid_amount.clone());
-
-        println!("Max taker ask {:?}", max_by_taker_ask.clone().to_string());
 
         // use maker's ask as the cap
         let max_by_taker_bid = remaining_bid
             .clone()
             .min(matching_order.remaining_ask_amount.clone());
 
-        println!("Max taker bid {:?}", max_by_taker_bid.clone().to_string());
+        // use ratio
+        let bid_fill_from_ask_constraint = &max_by_taker_ask / &maker_ratio;
 
         // use ratio
-        let bid_fill_from_ask_constraint = (&max_by_taker_ask / &maker_ratio);
-
-        println!(
-            "Bid fill from ask {:?}",
-            bid_fill_from_ask_constraint.clone().to_string()
-        );
-
-        // use ratio
-        let ask_fill_from_bid_constraint = (&max_by_taker_bid * &maker_ratio);
-
-        println!(
-            "Ask fill from bid {:?}",
-            ask_fill_from_bid_constraint.clone().to_string()
-        );
+        let ask_fill_from_bid_constraint = &max_by_taker_bid * &maker_ratio;
 
         // more restrictive wins
         let (actual_taker_fill_bid, actual_taker_fill_ask) =

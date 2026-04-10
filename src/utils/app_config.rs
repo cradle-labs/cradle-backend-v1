@@ -42,7 +42,11 @@ impl AppConfig {
         let DATABASE_URL = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set in .env file or environment variables");
         let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL);
-        let pool = Pool::new(manager)?;
+        let pool = Pool::builder()
+            .max_size(50)
+            .min_idle(Some(5))
+            .connection_timeout(std::time::Duration::from_secs(5))
+            .build(manager)?;
 
         let wallet = ActionWallet::from_env();
 
